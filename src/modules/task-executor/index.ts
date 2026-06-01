@@ -174,62 +174,107 @@ export interface HookReviewResult {
   reason?: string;
 }
 
+import type { HookReviewConfig } from './hook-review.js';
+
 /**
- * 钩子审核模式：将任务写入飞书/微信等多维表，人工标记后再执行
- * V1 实现：直接批准（mock），留接口
+ * 钩子审核（re-export 真实飞书实现，见 ./hook-review.js）
+ * 保留旧签名的便利函数：把 boolean 自动包装成 {enabled: boolean}
  */
-export async function reviewHook(task: Task, reviewConfig: boolean): Promise<HookReviewResult> {
-  if (!reviewConfig) {
-    return { approved: true };
-  }
-
-  // TODO: 接入飞书/微信多维表审核 API
-  // 1. 写入待审核任务到多维表
-  // 2. 轮询审核状态（approved/modified/skipped）
-  // 3. 返回审核结果
-
-  // V1 mock：直接批准
-  return { approved: true };
+export async function reviewHook(
+  task: Task,
+  config: boolean | HookReviewConfig = false
+): Promise<HookReviewResult> {
+  const realConfig: HookReviewConfig =
+    typeof config === 'boolean' ? { enabled: config } : config;
+  const { reviewHook: realReviewHook } = await import('./hook-review.js');
+  return realReviewHook(task, realConfig);
 }
 
+// re-export 真实飞书 hook-review
+export type { HookReviewConfig } from './hook-review.js';
+
 // ---------------------------------------------------------------------------
-// 浏览器执行（V1 mock，不真调浏览器，留接口）
+// 浏览器执行（V1.4 真实 puppeteer-core，§3.6.5）
 // ---------------------------------------------------------------------------
 
 export interface BrowserExecuteOptions {
+  /** Chrome 用户数据目录（探星Profile） */
   chromeProfile?: string;
+  /** Chrome 可执行文件路径 */
+  executablePath?: string;
   headless?: boolean;
+  /** 注入 fake browser 用于单测（不允许用于生产） */
+  __fakeBrowser?: import('puppeteer-core').Browser;
 }
 
 /**
- * 通过登录态浏览器执行单个任务
- * V1 实现：mock 返回成功，不真调浏览器
+ * 通过登录态浏览器执行单个任务（V1.4 真浏览器）
  */
 export async function browserExecute(
   task: Task,
-  _opts: BrowserExecuteOptions = {}
+  opts: BrowserExecuteOptions = {}
 ): Promise<ExecutionResult> {
-  // 模拟执行延迟
-  await new Promise(resolve => setTimeout(resolve, 500));
+  const { executeBrowserAction } = await import('./browser-actions.js');
 
-  // V1 mock：根据 action 返回模拟结果
-  // 真实实现需要：
-  // 1. 启动 puppeteer 或调用 opencli browser skill
-  // 2. 导航到目标页面
-  // 3. 执行对应操作（like/comment/friend/dm）
-  // 4. 检测风控信号（滑块/限流/IP切换）
-  // 5. 返回执行结果
+  // 单元测试路径：允许注入 fake browser（__fakeBrowser）来 mock puppeteer；
+  // 这里 mock 的是 puppeteer 库本身，不是 action 逻辑
+  if (opts.__fakeBrowser) {
+    return executeBrowserActionWithBrowser(task, opts.__fakeBrowser);
+  }
 
-  const result: ExecutionResult = {
+  const browserConfig = {
+    executablePath: opts.executablePath,
+    userDataDir: opts.chromeProfile ?? '~/.config/google-chrome/Default',
+    headless: opts.headless ?? false,
+  };
+
+  return executeBrowserAction(task, browserConfig);
+}
+
+async function executeBrowserActionWithBrowser(
+  task: Task,
+  browser: import('puppeteer-core').Browser
+): Promise<ExecutionResult> {
+  // 单测 helper：直接复用 browser-actions 的真逻辑，但注入 fake browser
+  const { likeAndFollow, commentReply, friendRequest, sendDirectMessage } = await import('./browser-actions.js');
+  const customFields = (task as any).custom_fields ?? {};
+  const videoUrl = customFields.video_url as string | undefined;
+  const userSecUid = customFields.user_sec_uid as string | undefined;
+  const baseResult: ExecutionResult = {
     task_id: task.task_id,
     lead_cid: task.lead_cid,
     action: task.next_action,
     result: 'executed_with_response',
     executed_at: new Date().toISOString(),
-    response_text: undefined,
   };
+  if (task.next_action === 'send_material') return baseResult;
 
-  return result;
+  let outcome;
+  switch (task.next_action) {
+    case 'like_and_follow':
+      if (!videoUrl) return { ...baseResult, result: 'failed_network', error_message: 'no video_url' };
+      outcome = await likeAndFollow(videoUrl, browser);
+      break;
+    case 'comment_reply':
+      if (!videoUrl) return { ...baseResult, result: 'failed_network', error_message: 'no video_url' };
+      outcome = await commentReply(videoUrl, task.hook, browser);
+      break;
+    case 'friend_request':
+      if (!userSecUid) return { ...baseResult, result: 'failed_network', error_message: 'no user_sec_uid' };
+      outcome = await friendRequest(userSecUid, browser);
+      break;
+    case 'dm':
+      if (!userSecUid) return { ...baseResult, result: 'failed_network', error_message: 'no user_sec_uid' };
+      outcome = await sendDirectMessage(userSecUid, task.hook, browser);
+      break;
+    default:
+      return { ...baseResult, result: 'skipped' };
+  }
+  if (!outcome.ok) {
+    if (outcome.riskSignal) return { ...baseResult, result: 'failed_risk', risk_signal: outcome.riskSignal };
+    return { ...baseResult, result: 'failed_network', error_message: outcome.error };
+  }
+  return baseResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +288,16 @@ export async function executeTasks(
 ): Promise<ExecutionResult[]> {
   const results: ExecutionResult[] = [];
   const rateLimiter = createRateLimiter();
-  const hookReview = config.hook_review ?? true;
+  // 兼容旧的 boolean 写法；新写法是对象
+  const rawHookReview = (config as any).hook_review;
+  const hookReviewEnabled: boolean =
+    typeof rawHookReview === 'boolean' ? rawHookReview :
+    typeof rawHookReview === 'object' && rawHookReview !== null ? (rawHookReview.enabled ?? false) :
+    false;
+  const hookReviewConfig = {
+    enabled: hookReviewEnabled,
+    timeoutSeconds: 60,
+  };
 
   for (const task of tasks) {
     // 1. 检查紧急停止开关
@@ -257,7 +311,7 @@ export async function executeTasks(
     }
 
     // 3. 钩子审核（如需）
-    const reviewResult = await reviewHook(task, hookReview);
+    const reviewResult = await reviewHook(task, hookReviewConfig);
     if (!reviewResult.approved) {
       results.push({
         task_id: task.task_id,

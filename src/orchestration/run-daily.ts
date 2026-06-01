@@ -96,9 +96,15 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     await updateStep(1, 'running');
     try {
       const { analyzeBatch } = await import('../modules/intent-analyzer/index.js');
+      const { selectBestHookStyle } = await import('../modules/nurture-engine/feedback-loader.js');
       const systemPrompt = await loadSystemPrompt(loaded.promptsDir, profile);
       const userTpl = await readFileFromPrompts(loaded.promptsDir, 'intent-user.md');
       const llm = opts.injectLLM ?? (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
+
+      // §3.11 回路 2：注入当前最优钩子风格（写到 lead.hook_style）
+      // 优先级：weekly-insights.json（≥3 次测试的最优风格） > profile.hook_config.style > '像朋友推荐，不像销售'
+      const bestStyle = await selectBestHookStyle();
+      const hookStyle = bestStyle ?? profile.hook_config?.style ?? '像朋友推荐，不像销售';
 
       const batchCtx: import('../modules/intent-analyzer/batch.js').BatchContext = {
         profile,
@@ -106,6 +112,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
         userTplStr: userTpl,
         llm,
         threshold: 0.7,
+        hookStyle,
       };
       const batchSize = 10;
       for (let i = 0; i < filtered.length; i += batchSize) {

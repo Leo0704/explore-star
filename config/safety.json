@@ -28,5 +28,12 @@
     "enabled": false,
     "review_before_execute": true,
     "auto_apply_after_weeks": 2
+  },
+  "browser": {
+    "_comment": "真实浏览器配置（puppeteer-core + 用户 Chrome Profile）",
+    "executable_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "user_data_dir": "~/Library/Application Support/Google/Chrome/探星Profile",
+    "headless": false,
+    "_user_data_dir_note": "用户首次使用时需在 Chrome 中登录抖音（V1.4 设计：'探星Profile' 独立 Profile）"
   }
 }

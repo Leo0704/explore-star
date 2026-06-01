@@ -186,7 +186,8 @@ function nextActionForState(status: LeadStatus): TaskAction | null {
     case '已关注': return 'comment_reply';
     case '已互动': return 'friend_request';
     case '已加好友': return 'dm';
-    case '已加微': return 'send_material';
+    case '已私信': return 'send_material';
+    case '已加微': return null;  // 交给 §3.10 转化引擎
     case '已预约': return null;  // 等待客户回访
     case '沉默': return 'dm';  // 再激活
     case '已再激活': return 'dm';

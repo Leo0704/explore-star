@@ -74,9 +74,14 @@ describe('引导引擎', () => {
       expect(tasks[0].next_action).toBe('comment_reply');
     });
 
-    it('已加微 → 任务 = send_material', () => {
-      const tasks = generateDailyTasks([mkLead({ status: '已加微' })], { profile, conversion });
+    it('已私信 → 任务 = send_material', () => {
+      const tasks = generateDailyTasks([mkLead({ status: '已私信' })], { profile, conversion });
       expect(tasks[0].next_action).toBe('send_material');
+    });
+
+    it('已加微（终态，交给转化引擎） → 不生成任务', () => {
+      const tasks = generateDailyTasks([mkLead({ status: '已加微' })], { profile, conversion });
+      expect(tasks).toHaveLength(0);
     });
 
     it('已成交（终态）→ 不生成任务', () => {

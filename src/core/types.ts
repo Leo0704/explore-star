@@ -162,6 +162,7 @@ export type LeadStatus =
   | '已关注'
   | '已互动'
   | '已加好友'
+  | '已私信'
   | '已加微'
   | '已预约'
   | '已成交'
@@ -226,6 +227,16 @@ export interface Lead {
   updated_at: string;
   notes?: string;
   custom_fields?: Record<string, unknown>;
+
+  // 🆕 反馈分析归因字段（§3.11 全链路归因）
+  /** 触发该 lead 的关键词/sec_uid（回路 1 关键词权重归因） */
+  source_keyword?: string;
+  /** 来源视频 ID（与 aweme_id 一致；显式声明以满足 §3.11 字段契约） */
+  source_video_id?: string;
+  /** 实际使用的钩子风格（回路 2 钩子风格 A/B 归因） */
+  hook_style?: string;
+  /** lead 首次发现时间 ISO 8601（与 created_at 通常相同；显式声明满足 §3.3 字段契约） */
+  detected_at?: string;
 }
 
 // ============================================================================

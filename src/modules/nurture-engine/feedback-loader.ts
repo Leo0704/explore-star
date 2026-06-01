@@ -52,3 +52,19 @@ export async function isLearningPeriodComplete(): Promise<boolean> {
   if (!insights) return false;
   return insights.learning_period_complete ?? false;
 }
+
+/**
+ * 从最新 weekly-insights.json 选出回复率最高的钩子风格（§3.11 回路 2）
+ * - 至少 3 次测试才采纳（避免冷启动期噪声）
+ * - 冷启动 / 无数据 / 风格全低于阈值时返回 null（调用方决定 fallback 到 profile.hook_config?.style）
+ */
+export async function selectBestHookStyle(): Promise<string | null> {
+  const insights = await loadLatestInsights();
+  if (!insights?.hook_style_performance?.length) return null;
+
+  const candidates = insights.hook_style_performance
+    .filter(s => s.tested >= 3)
+    .sort((a, b) => b.rate - a.rate);
+
+  return candidates[0]?.style ?? null;
+}

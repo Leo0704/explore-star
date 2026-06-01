@@ -14,6 +14,8 @@ export interface BatchContext {
   userTplStr: string;
   llm: { complete(prompt: string): Promise<string> };
   threshold: number;
+  /** 本批次统一使用的钩子风格（§3.11 回路 2 归因必填） */
+  hookStyle?: string;
 }
 
 export type BatchRejectedItem = { cid: string; reason: string; raw?: string };
@@ -112,7 +114,7 @@ export async function analyzeBatch(
       continue;
     }
 
-    leads.push(buildLead(comment, item, now));
+    leads.push(buildLead(comment, item, now, ctx.hookStyle));
   }
 
   // 剩余未分析的评论（LLM 返回数量不足）
@@ -138,6 +140,7 @@ function buildLead(
     suggested_dm_hook: string;
   },
   now: string,
+  hookStyle?: string,
 ): Lead {
   return {
     cid: comment.cid,
@@ -146,6 +149,11 @@ function buildLead(
     video_url: comment.video_url,
     video_desc: comment.video_desc,
     keyword: comment.keyword,
+    // 🆕 §3.11 全链路归因 4 字段
+    source_keyword: comment.keyword,
+    source_video_id: comment.aweme_id,
+    hook_style: hookStyle ?? 'default',
+    detected_at: now,
 
     nickname: comment.user.nickname,
     user_signature: comment.user.signature,

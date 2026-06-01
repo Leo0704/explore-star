@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__MiniMax__web_search",
+      "Bash(curl -s *)",
+      "Bash(sqlite3 *)"
+    ]
+  }
+}
