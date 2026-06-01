@@ -1,148 +1,93 @@
-# 探星（Explore-Star）
+# 燃点 FDE 业务示例
 
-> 抖音评论截流自动化框架 —— 通过 OpenCLI + LLM 自动发现潜在客户，提供从「侦察 → 引导 → 转化 → 反馈」全流程编排支持。
+> 这是探星框架的**默认示例业务**——作者 lylyyds 的真实业务脱敏版。
+>
+> **重要**：本目录是**配置参考**，不是框架代码的一部分。框架核心代码在 `/Users/lylyyds/Desktop/explore-star/src/`。
 
-![status](https://img.shields.io/badge/status-v1.4-blue)
-![license](https://img.shields.io/badge/license-MIT-green)
-![node](https://img.shields.io/badge/node-%3E%3D20-blue)
+## 业务概览
 
-## ✨ 特性
+- **业务名**：燃点 FDE
+- **价值主张**：派工程师到企业现场做定制化 AI 落地
+- **目标客户**：自媒体矩阵 / 电商 / 在线教育 等小微企业
+- **典型单客价值**：5-15 万元（项目交付）
+- **复购率**：98%
 
-- **🔍 侦察**：按目标 KOL（推荐）或关键词从抖音拉视频+评论
-- **🤖 意图分析**：用 LLM 识别高意向潜在客户，模板化 prompt（业务无关）
-- **📚 RAG 钩子生成**：基于业务知识库生成自然、有温度的话术
-- **🧭 引导引擎**：状态机 + 互动感知 + 智能放弃 + 再激活（贝叶斯平滑算法）
-- **💰 转化引擎**：加微后自动推物料 + 转化日报 + ROI 计算
-- **🔁 反馈闭环**：每周自动分析关键词权重、钩子风格、Persona 价值
+## 目录结构
 
-## 🚀 5 分钟上手
+```
+燃点-FDE/
+├── README.md              ← 本文件
+├── profile.yaml           ← 业务画像（§2.4.1）
+├── channels.yaml          ← 渠道配置（§2.4.2）：关键词 + 目标 KOL
+├── crm.yaml               ← CRM 配置（§3.5）：飞书多维表字段映射
+├── conversion.yaml        ← 转化配置（§2.4.3）：生命周期 + 物料 + 预约
+├── prompts/
+│   ├── intent-system.md   ← §3.3 意图分析 system prompt
+│   ├── intent-user.md     ← §3.3 意图分析 user prompt 模板
+│   ├── hook-reply.md      ← §3.4 钩子生成（评论回复）模板
+│   └── hook-dm.md         ← §3.4 钩子生成（私信）模板
+├── knowledge/             ← §3.4 RAG 知识库（待补充）
+└── assets/                ← §3.10 获客物料（待补充）
+```
+
+## 业务方上手
+
+### 1. 复制本目录
 
 ```bash
-# 1. 安装
-git clone <repo>
-cd explore-star
-npm install
-
-# 2. 设置 LLM Key
-export DEEPSEEK_API_KEY=sk-...
-
-# 3. 复制示例业务
 npx explore-star init my-business
-
-# 4. 编辑配置（改 3-5 个字段）
-vim my-business/profile.yaml
-
-# 5. 检查环境
-npx explore-star doctor
-
-# 6. 试跑
-npx explore-star run --business=./my-business --dry-run
+# 自动从 business.example/燃点-FDE/ 复制模板
+# 复制到 ./my-business/
 ```
 
-## 🏗️ 架构
+### 2. 修改 3-5 个字段
 
-4 阶段闭环：
+**最少必改的字段**（`my-business/profile.yaml`）：
 
-```
-侦察 → 引导 → 转化 → 反馈 ↻
-                ↑_______|
-```
+```yaml
+business:
+  name: "你的业务名"        # ← 必改
+  value_prop: "你的价值主张"  # ← 必改
 
-详见 [`docs/superpowers/specs/2026-06-01-explore-star-design.md`](docs/superpowers/specs/2026-06-01-explore-star-design.md)
+target_personas:           # ← 必改（替换为你的目标人设）
+  - id: your_persona_1
+    name: "你的目标人设 1"
+    typical_pain_points: ["痛点 A", "痛点 B"]
 
-## 📁 目录结构
-
-```
-explore-star/
-├── src/                           # 框架核心代码（业务无关）
-│   ├── core/
-│   │   ├── types.ts               # 完整 TypeScript 类型定义
-│   │   └── business-profile.ts    # 业务配置加载与校验
-│   ├── adapters/
-│   │   ├── registry.ts            # Adapter 注册中心
-│   │   ├── llm/                   # OpenAI / DeepSeek
-│   │   ├── crm/                   # CSV / 飞书
-│   │   ├── channel/               # 抖音（基于 opencli 源码）
-│   │   ├── notifier/              # Console / 微信 / 飞书 WebHook
-│   │   └── embeddings/            # OpenAI Embeddings
-│   ├── modules/
-│   │   ├── intent-analyzer/       # §3.3 意图分析
-│   │   ├── nurture-engine/        # §3.6 引导引擎
-│   │   ├── conversion-engine/     # §3.10 转化引擎
-│   │   └── feedback-analyzer/     # §3.11 反馈分析器
-│   ├── rag/                       # §3.4 RAG 知识库 + 钩子生成
-│   ├── orchestration/
-│   │   └── run-daily.ts           # §3.7 编排器
-│   └── cli/
-│       └── index.ts               # CLI 入口
-├── business.example/燃点-FDE/     # 默认示例业务（脱敏）
-├── docs/
-│   ├── superpowers/specs/         # 完整设计文档
-│   └── algorithms/                # 算法 spec
-├── tests/                         # 单元测试（35 个测试，100% 通过）
-├── config/
-│   └── safety.json                # 5 铁律 + 限速配置
-├── package.json
-├── tsconfig.json
-└── README.md                      ← 本文件
+crm:
+  type: feishu             # ← 可改（notion / airtable / csv）
+  config:
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    table_id: "你的表 ID"   # ← 必改
 ```
 
-## 🧪 测试
+### 3. 跑起来
 
 ```bash
-npx vitest run
+npx explore-star doctor          # 检查环境
+npx explore-star run --business=./my-business --dry-run
+npx explore-star run --business=./my-business
 ```
 
-**当前状态**：35 个测试全部通过。
+## 与燃点 FDE 业务相关的隐私
 
-覆盖：
-- `DouyinChannel` adapter（17 个测试）：search / getUserVideos / ping / 错误处理
-- `NurtureEngine`（12 个测试）：状态机 / 互动感知 / 智能放弃 / 再激活 / 优先级
-- `FeedbackAnalyzer` 算法（6 个测试）：贝叶斯平滑 / 风格切换门槛 / 权重钳位
+本目录已脱敏：
+- ❌ 真实 KOL sec_uid 列表为空（业务方需要自己填）
+- ❌ 真实客户案例已脱敏或留空（业务方填自己的）
+- ❌ 真实 CRM table_id 替换为示例
+- ❌ 飞书 app_id / app_secret 改为环境变量引用
 
-## 🛠️ 依赖
+## 业务效果表（首版实现时同步发布）
 
-| 依赖 | 用途 | 是否必须 |
-|---|---|---|
-| Node.js ≥ 20 | 运行时 | ✅ |
-| `opencli` ≥ 1.8.0 | 抖音数据采集 | ✅ |
-| Chrome + 抖音登录态 | Cookie 复用 | ✅ |
-| `DEEPSEEK_API_KEY` | LLM（推荐）/ `OPENAI_API_KEY` 备选 | ✅ |
-| `OPENAI_API_KEY` | Embeddings（用于 RAG） | 可选 |
-| 飞书开放平台应用 | CRM 同步（生产推荐） | 可选 |
+> 本表的实现细节见 `docs/business-models/lylyyds-燃点-FDE.md`。
+> 框架本身**不假设**任何业务效果——这个表仅作作者业务的实际数据记录。
 
-## 🔒 合规
-
-- ✅ 只抓公开视频元数据
-- ✅ 评论分析**不上传**给 LLM 训练（API 禁用训练）
-- ✅ 私信内容**人工撰写**，程序不自动发送
-- ❌ 不做群发垃圾私信、骚扰、虚假宣传
-- ❌ 不把抓取数据用于训练 AI
-
-详见设计文档 §5.6。
-
-## 📊 框架效果（业务无关指标）
-
-| 维度 | 目标 |
-|---|---|
-| 侦察 | 50 视频 / 5000 评论 / 100-200 高意向 lead |
-| 引导 | 5-20 任务 / 天，3 次 0 回应自动降级 |
-| 转化 | 转化日报含 ROI、Hot Leads、At Risk |
-| 反馈 | 学习期 14 天后开始调优；自动调优关键词权重 |
-| 月成本 | < 500 元（LLM + 飞书 API） |
-
-**业务专属效果**（营收/ROI/LTV）见各业务的 README——框架**不假设**任何具体数字。
-
-## 📜 许可证
-
-MIT
-
-## 🤝 贡献
-
-欢迎贡献：
-- 新 Channel Adapter（小红书 / B站 / 视频号）
-- 新 CRM Adapter（Notion / Airtable / HubSpot）
-- 新 LLM Provider（Anthropic / Ollama / 通义千问）
-- 新业务示例（律师 / 咨询 / 设计）
-
-详见 `CONTRIBUTING.md`（待补）。
+| 阶段 | 指标 | 保守目标 | 乐观目标 |
+|---|---|---|---|
+| 侦察 | 月新增意向 lead | 1500-2500 | 3000-5000 |
+| 引导 | 月加微信 | 30-50 | 80-150 |
+| 转化 | 月成交 | 1-3 | 3-8 |
+| 转化 | 月营收 | 5-45 万 | 15-240 万 |
+| ROI | 单 LLM 成本 | < 50 元 | < 15 元 |
+| ROI | **整体 ROI** | **100x-300x** | **500x-1500x** |

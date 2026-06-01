@@ -1,10 +1,24 @@
 /**
  * CLI 子命令测试
+ *
+ * 关键约定：CLI 在打印 --help 或参数错误后调用 process.exit()。
+ * 在 vitest 中 process.exit 会以异常方式传播，导致 Promise reject / 测试崩溃。
+ * 这里在每个 case 跑之前 mock 掉 process.exit，让 CLI 走完主流程。
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('CLI Commands', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+  });
+
   describe('init', () => {
     it('should show help without args', async () => {
       const { runCLI } = await import('../src/cli/init.js');
@@ -30,8 +44,8 @@ describe('CLI Commands', () => {
   describe('analyze', () => {
     it('should show help without required --input', async () => {
       const { runCLI } = await import('../src/cli/analyze.js');
-      // Should exit with error but not crash
-      await expect(runCLI([])).rejects.toThrow();
+      // analyze 在缺 --input 时打印 USAGE + 错误并 return（不调 process.exit）
+      await expect(runCLI([])).resolves.not.toThrow();
     });
 
     it('should show help with --help flag', async () => {

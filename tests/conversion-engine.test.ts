@@ -38,6 +38,13 @@ const mockProfile: BusinessProfile = {
 };
 
 describe('ConversionEngine', () => {
+  beforeEach(async () => {
+    // 注册内置 Notifier（pushMaterial 默认用 console notifier）
+    const { registerBuiltins } = await import('../src/adapters/registry.js');
+    await registerBuiltins();
+    vi.clearAllMocks();
+  });
+
   // Test material-pusher
   describe('pushMaterial', () => {
     it('should skip if wechat_added_at is missing', async () => {

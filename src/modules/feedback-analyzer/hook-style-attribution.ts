@@ -8,7 +8,14 @@
 
 import type { LeadEvent, HookStylePerformance } from '../../core/types.js';
 
-const RESPONSIVE_STATUSES = new Set(['已互动', '已加好友', '已加微', '已预约', '已成交', '已私信']);
+/**
+ * §3.11 回路 2：钩子风格 A/B
+ * - `replied`  = 客户对钩子做出了响应（移动到「已互动 / 已私信 / 已加好友 / 已加微」）
+ * - `converted` = 客户最终成交（移动到「已成交」）
+ * 两者独立统计——`已成交` 不再被算作 `replied`，与 §3.11 末尾 weekly-insights.json 字段定义一致。
+ */
+const REPLIED_STATUSES = new Set(['已互动', '已私信', '已加好友', '已加微']);
+const CONVERTED_STATUSES = new Set(['已成交']);
 
 export interface HookStyleAttributionResult {
   performance: HookStylePerformance[];
@@ -16,7 +23,7 @@ export interface HookStyleAttributionResult {
 }
 
 /**
- * 计算各钩子风格的回复率
+ * 计算各钩子风格的回复率 / 成交率
  */
 export function computeHookStyleAttribution(events: LeadEvent[]): HookStyleAttributionResult {
   const byStyle: Record<string, { tested: Set<string>; replied: number; converted: number }> = {};
@@ -25,10 +32,10 @@ export function computeHookStyleAttribution(events: LeadEvent[]): HookStyleAttri
     if (!e.hook_style) continue;
     if (!byStyle[e.hook_style]) byStyle[e.hook_style] = { tested: new Set(), replied: 0, converted: 0 };
     byStyle[e.hook_style].tested.add(e.cid);
-    if (e.to_status && RESPONSIVE_STATUSES.has(e.to_status as string)) {
+    if (e.to_status && REPLIED_STATUSES.has(e.to_status as string)) {
       byStyle[e.hook_style].replied++;
     }
-    if (e.to_status === '已成交') {
+    if (e.to_status && CONVERTED_STATUSES.has(e.to_status as string)) {
       byStyle[e.hook_style].converted++;
     }
   }

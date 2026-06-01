@@ -1,0 +1,67 @@
+# 燃点 FDE 转化路径配置（脱敏示例）
+
+# 业务方自定义的客户全生命周期状态
+lifecycle_states:
+  - id: discovered
+    name: "新发现"
+    is_terminal: false
+  - id: engaged
+    name: "已互动"
+    is_terminal: false
+  - id: wechat_added
+    name: "已加微"
+    is_terminal: false
+  - id: booked
+    name: "已预约"
+    is_terminal: false
+  - id: diagnosis_done
+    name: "已诊断"
+    is_terminal: false
+  - id: closed
+    name: "已成交"
+    is_terminal: true
+  - id: lost
+    name: "已流失"
+    is_terminal: true
+
+# 哪些状态算"转化成功"（§3.11 反馈分析器用来计算转化率）
+success_states:
+  - "closed"               # 默认只把"已成交"算成功
+
+# 客户加微后 24h 内推送的获客物料
+post_add_asset:
+  type: pdf
+  name: "AI 落地自查清单"
+  path: "./assets/ai-readiness-checklist.pdf"  # 业务方放在 business.example/燃点-FDE/assets/
+
+# 转化路径入口
+booking_url: "https://fde-landing.example.com/book"
+
+# 推送话术模板（支持 {{nickname}} 变量）
+message_template: |
+  {{nickname}} 您好，我是燃点 FDE 的 lylyyds。
+  加微后发了份「AI 落地自查清单」给您，里面是 30+ 家小微企业
+  走过的坑和清单。
+  如果最近在考虑 AI 落地，可以约个 30 分钟的免费诊断：
+  {{booking_url}}
+  没需要也完全没关系，就当交个朋友。
+
+# 预约监听（V1.4: 飞书日历；V2: 抽象为 BookingProvider）
+booking_provider:
+  type: feishu_calendar
+  config:
+    calendar_id_env: FEISHU_CALENDAR_ID
+    webhook_secret_env: FEISHU_WEBHOOK_SECRET
+
+# 沉默客户再激活
+reactivation:
+  dormant_days: 30       # 加微后 30 天无互动 → 进再激活池
+  max_attempts: 1        # 每月最多触达 1 次
+  message_template: |
+    {{nickname}} 您好，上次给您发的「AI 自查清单」看了吗？
+    如果最近又有了新的 AI 落地想法，可以重新约个诊断聊聊。
+    没想法也欢迎随时交流 :)
+
+# 可选：ROI 计算配置
+cost_per_lead: 5         # 单 lead 成本估算（元），用于 §3.10 转化日报的 ROI 计算
+revenue_field: revenue   # CRM 中"营收"字段名
