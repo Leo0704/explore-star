@@ -159,11 +159,12 @@ describe('generateHook 钩子生成', () => {
 // ---------------------------------------------------------------------------
 
 describe('retrieveTopK 检索', () => {
-  it('db 不存在时返回空数组', async () => {
+  it('db 目录不存在时返回空数组', async () => {
+    // 当目录不存在时 better-sqlite3 抛出 TypeError
     const docs = await retrieveTopK(
       'AI 剪辑',
       3,
-      './non-existent-path/vectors.db',
+      './non-existent-dir/vectors.db',
       mockEmbeddingProvider,
     );
     expect(docs).toEqual([]);

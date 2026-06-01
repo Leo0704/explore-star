@@ -4,7 +4,7 @@
  * 从 sqlite-vec 索引中 top-K cosine 相似度检索。
  */
 
-import Database from 'better-sqlite3';
+import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import type { EmbeddingProvider } from '../core/types.js';
 import { cosineSimilarity } from './index-builder.js';
 
@@ -30,7 +30,12 @@ export async function retrieveTopK(
 ): Promise<RetrievedDoc[]> {
   const queryEmbedding = await embeddingProvider.embed(query);
 
-  const db = new Database(dbPath);
+  let db: DatabaseType;
+  try {
+    db = new Database(dbPath);
+  } catch {
+    return [];
+  }
   try {
     db.loadExtension('sqlite-vec');
 

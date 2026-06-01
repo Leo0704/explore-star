@@ -74,7 +74,10 @@ export async function analyzeBatch(
   const leads: Lead[] = [];
   const rejected: BatchRejectedItem[] = [];
 
-  for (let i = 0; i < parsed.length; i++) {
+  // 如果 LLM 返回数量少于输入，剩余的视为「无法分析」
+  const analyzedCount = Math.min(parsed.length, comments.length);
+
+  for (let i = 0; i < analyzedCount; i++) {
     const item = parsed[i] as {
       is_target_persona: boolean;
       persona: string;
@@ -110,6 +113,11 @@ export async function analyzeBatch(
     }
 
     leads.push(buildLead(comment, item, now));
+  }
+
+  // 剩余未分析的评论（LLM 返回数量不足）
+  for (let i = analyzedCount; i < comments.length; i++) {
+    rejected.push({ cid: comments[i].cid, reason: `LLM 输出不足（${parsed.length}/${comments.length}）` });
   }
 
   return { leads, rejected, llmErrors };

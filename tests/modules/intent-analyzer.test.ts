@@ -2,11 +2,7 @@
  * 意图分析器测试
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { analyzeComments } from '../../src/modules/intent-analyzer/index.js';
-import { isMarketingAccount, filterMarketingComments } from '../../src/modules/intent-analyzer/marketing-filter.js';
-import { loadPromptTemplates, compileIntentSystemPrompt, compileIntentUserPrompt } from '../../src/modules/intent-analyzer/prompts-loader.js';
-import { analyzeBatch } from '../../src/modules/intent-analyzer/batch.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Comment, BusinessProfile } from '../../src/core/types.js';
 
 // ---------------------------------------------------------------------------
@@ -73,20 +69,23 @@ function makeComment(overrides: Partial<Comment> = {}): Comment {
 // ---------------------------------------------------------------------------
 
 describe('营销号过滤', () => {
-  it('识别营销号昵称格式', () => {
+  it('识别营销号昵称格式', async () => {
+    const { isMarketingAccount } = await import('../../src/modules/intent-analyzer/marketing-filter.js');
     expect(isMarketingAccount('A123456', '').isMarketing).toBe(true);
     expect(isMarketingAccount('某猫AI客服', '').isMarketing).toBe(true);
     expect(isMarketingAccount('代购小王', '').isMarketing).toBe(true);
     expect(isMarketingAccount('AI工具爱好者', '').isMarketing).toBe(false);
   });
 
-  it('识别营销号签名', () => {
+  it('识别营销号签名', async () => {
+    const { isMarketingAccount } = await import('../../src/modules/intent-analyzer/marketing-filter.js');
     expect(isMarketingAccount('真实用户', '加我微信: xxx').isMarketing).toBe(true);
     expect(isMarketingAccount('真实用户', '低价代购，量大从优').isMarketing).toBe(true);
     expect(isMarketingAccount('真实用户', '普通用户签名').isMarketing).toBe(false);
   });
 
-  it('filterMarketingComments 过滤掉营销号，保留正常用户', () => {
+  it('filterMarketingComments 过滤掉营销号，保留正常用户', async () => {
+    const { filterMarketingComments } = await import('../../src/modules/intent-analyzer/marketing-filter.js');
     const comments: Comment[] = [
       makeComment({ cid: 'c1', user: { nickname: 'A999', uid: 'u1', follower_count: 100, signature: '' } }),
       makeComment({ cid: 'c2', user: { nickname: '普通用户', uid: 'u2', follower_count: 100, signature: '' } }),
@@ -101,31 +100,39 @@ describe('营销号过滤', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 测试：模板渲染
+// 测试：模板加载和渲染（使用内联模板避免文件系统）
 // ---------------------------------------------------------------------------
 
-describe('Prompt 模板渲染', () => {
-  const promptsDir = './business.example/燃点-FDE/prompts';
-
+describe('Prompt 模板', () => {
   it('loadPromptTemplates 加载所有 4 个模板', async () => {
-    const tpls = await loadPromptTemplates(promptsDir);
+    const { loadPromptTemplates } = await import('../../src/modules/intent-analyzer/prompts-loader.js');
+    const tpls = await loadPromptTemplates('./business.example/燃点-FDE/prompts');
     expect(tpls.intentSystem).toBeTruthy();
     expect(tpls.intentUser).toBeTruthy();
     expect(tpls.hookReply).toBeTruthy();
     expect(tpls.hookDm).toBeTruthy();
   });
 
-  it('compileIntentSystemPrompt 正确注入业务画像', async () => {
-    const tpls = await loadPromptTemplates(promptsDir);
-    const rendered = compileIntentSystemPrompt(tpls.intentSystem, { business: mockProfile });
+  it('compileIntentSystemPrompt 注入业务画像', async () => {
+    const { compileIntentSystemPrompt } = await import('../../src/modules/intent-analyzer/prompts-loader.js');
+    const systemCtx = {
+      business: {
+        name: '燃点 FDE',
+        value_prop: '派工程师到企业现场做定制化 AI 落地',
+        target_personas: mockProfile.target_personas,
+        intent_signals: ['AI 工具', '自动化'],
+        buying_stages: mockProfile.buying_stages,
+      },
+    };
+    const tpl = '你是「{{business.name}}」的分析师。\n{{#each business.target_personas}}\n- {{name}}\n{{/each}}';
+    const rendered = compileIntentSystemPrompt(tpl, systemCtx);
     expect(rendered).toContain('燃点 FDE');
     expect(rendered).toContain('自媒体矩阵');
-    expect(rendered).toContain('AI 工具');
   });
 
-  it('compileIntentUserPrompt 正确注入评论上下文', async () => {
-    const tpls = await loadPromptTemplates(promptsDir);
-    const rendered = compileIntentUserPrompt(tpls.intentUser, {
+  it('compileIntentUserPrompt 注入评论上下文', async () => {
+    const { compileIntentUserPrompt } = await import('../../src/modules/intent-analyzer/prompts-loader.js');
+    const rendered = compileIntentUserPrompt('评论：{{comment_text}}\n用户：{{nickname}}', {
       video_desc: 'AI 工具推荐',
       video_url: 'https://douyin.com/video/123',
       nickname: '测试用户',
@@ -133,52 +140,53 @@ describe('Prompt 模板渲染', () => {
       follower_count: 1000,
       comment_text: '这个工具真的好用',
     });
-    expect(rendered).toContain('AI 工具推荐');
-    expect(rendered).toContain('测试用户');
-    expect(rendered).toContain('这个工具真的好用');
+    expect(rendered).toContain('评论：这个工具真的好用');
+    expect(rendered).toContain('用户：测试用户');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 测试：analyzeBatch 阈值过滤
+// 测试：analyzeBatch 批处理（直接 mock llm.complete）
 // ---------------------------------------------------------------------------
 
 describe('analyzeBatch 批处理', () => {
   it('intent_score < threshold 时正确 reject', async () => {
-    const mockLLM = vi.fn().mockResolvedValue(
+    const mockComplete = vi.fn().mockResolvedValue(
       JSON.stringify([
         { is_target_persona: true, persona: 'self_media', pain_point: 'AI 剪辑省人工', intent_score: 0.5, buying_stage: 'awareness', suggested_reply_hook: '赞', suggested_dm_hook: 'hi' },
         { is_target_persona: true, persona: 'self_media', pain_point: 'AI 写脚本稳定', intent_score: 0.8, buying_stage: 'consideration', suggested_reply_hook: '赞2', suggested_dm_hook: 'hi2' },
       ]),
     );
 
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
     const comments = [makeComment({ cid: 'c1' }), makeComment({ cid: 'c2' })];
     const { leads, rejected } = await analyzeBatch(comments, {
       profile: mockProfile,
       systemPrompt: 'system',
       userTplStr: '{{comment_text}}',
-      llm: mockLLM,
+      llm: { complete: mockComplete },
       threshold: 0.7,
     });
 
-    expect(leads).toHaveLength(1); // 只有 0.8 的那条
+    expect(leads).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reason).toContain('低于阈值');
   });
 
   it('非目标人设时正确 reject', async () => {
-    const mockLLM = vi.fn().mockResolvedValue(
+    const mockComplete = vi.fn().mockResolvedValue(
       JSON.stringify([
         { is_target_persona: false, persona: '', pain_point: '', intent_score: 0.9, buying_stage: 'awareness', suggested_reply_hook: '', suggested_dm_hook: '' },
       ]),
     );
 
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
     const comments = [makeComment({ cid: 'c1' })];
     const { leads, rejected } = await analyzeBatch(comments, {
       profile: mockProfile,
       systemPrompt: 'system',
       userTplStr: '{{comment_text}}',
-      llm: mockLLM,
+      llm: { complete: mockComplete },
       threshold: 0.7,
     });
 
@@ -187,18 +195,19 @@ describe('analyzeBatch 批处理', () => {
   });
 
   it('未知 persona 时正确 reject', async () => {
-    const mockLLM = vi.fn().mockResolvedValue(
+    const mockComplete = vi.fn().mockResolvedValue(
       JSON.stringify([
         { is_target_persona: true, persona: 'unknown_persona', pain_point: '痛点', intent_score: 0.9, buying_stage: 'awareness', suggested_reply_hook: '钩子', suggested_dm_hook: '私信' },
       ]),
     );
 
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
     const comments = [makeComment({ cid: 'c1' })];
     const { leads, rejected } = await analyzeBatch(comments, {
       profile: mockProfile,
       systemPrompt: 'system',
       userTplStr: '{{comment_text}}',
-      llm: mockLLM,
+      llm: { complete: mockComplete },
       threshold: 0.7,
     });
 
@@ -207,14 +216,15 @@ describe('analyzeBatch 批处理', () => {
   });
 
   it('LLM 调用失败时全部 reject', async () => {
-    const mockLLM = vi.fn().mockRejectedValue(new Error('LLM error'));
+    const mockComplete = vi.fn().mockRejectedValue(new Error('LLM error'));
 
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
     const comments = [makeComment({ cid: 'c1' }), makeComment({ cid: 'c2' })];
     const { leads, rejected, llmErrors } = await analyzeBatch(comments, {
       profile: mockProfile,
       systemPrompt: 'system',
       userTplStr: '{{comment_text}}',
-      llm: mockLLM,
+      llm: { complete: mockComplete },
       threshold: 0.7,
     });
 
@@ -224,7 +234,7 @@ describe('analyzeBatch 批处理', () => {
   });
 
   it('LLM 返回结果正确构建 lead', async () => {
-    const mockLLM = vi.fn().mockResolvedValue(
+    const mockComplete = vi.fn().mockResolvedValue(
       JSON.stringify([
         {
           is_target_persona: true,
@@ -238,6 +248,7 @@ describe('analyzeBatch 批处理', () => {
       ]),
     );
 
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
     const comments = [
       makeComment({ cid: 'c1', keyword: 'AI 工具', aweme_id: 'vid_abc' }),
     ];
@@ -246,12 +257,12 @@ describe('analyzeBatch 批处理', () => {
       profile: mockProfile,
       systemPrompt: 'system',
       userTplStr: '{{comment_text}}',
-      llm: mockLLM,
+      llm: { complete: mockComplete },
       threshold: 0.7,
     });
 
     expect(leads).toHaveLength(1);
-    expect(leads[0].keyword).toBe('AI 工具');  // 来源归因
+    expect(leads[0].keyword).toBe('AI 工具');
     expect(leads[0].aweme_id).toBe('vid_abc');
     expect(leads[0].is_target_persona).toBe(true);
     expect(leads[0].persona).toBe('self_media');
@@ -259,30 +270,57 @@ describe('analyzeBatch 批处理', () => {
   });
 
   it('返回 rejected 和 llmErrors 计数', async () => {
-    const mockLLM = vi.fn().mockResolvedValue(JSON.stringify([]));
+    const mockComplete = vi.fn().mockResolvedValue(JSON.stringify([]));
 
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
     const comments = Array.from({ length: 10 }, (_, i) => makeComment({ cid: `c${i}` }));
     const { leads, rejected, llmErrors } = await analyzeBatch(comments, {
       profile: mockProfile,
       systemPrompt: 'system',
       userTplStr: '{{comment_text}}',
-      llm: mockLLM,
+      llm: { complete: mockComplete },
       threshold: 0.7,
     });
 
     expect(leads).toHaveLength(0);
     expect(rejected).toHaveLength(10);
-    expect(llmErrors).toBe(0); // JSON 解析成功，只是所有条目的 intent_score < threshold
+    expect(llmErrors).toBe(0);
+  });
+
+  it('JSON 解析失败时全部 reject 并报告 raw', async () => {
+    const mockComplete = vi.fn().mockResolvedValue('这不是 JSON');
+
+    const { analyzeBatch } = await import('../../src/modules/intent-analyzer/batch.js');
+    const comments = [makeComment({ cid: 'c1' })];
+    const { leads, rejected } = await analyzeBatch(comments, {
+      profile: mockProfile,
+      systemPrompt: 'system',
+      userTplStr: '{{comment_text}}',
+      llm: { complete: mockComplete },
+      threshold: 0.7,
+    });
+
+    expect(leads).toHaveLength(0);
+    expect(rejected[0].raw).toBe('这不是 JSON');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 测试：analyzeComments 集成
+// 测试：analyzeComments 集成（mock 模板，避免文件系统）
 // ---------------------------------------------------------------------------
 
 describe('analyzeComments 集成', () => {
   it('filterMarketing=false 不过滤营销号', async () => {
-    const mockLLM = vi.fn().mockResolvedValue(JSON.stringify([]));
+    const mockComplete = vi.fn().mockResolvedValue(JSON.stringify([]));
+
+    const loaderSpy = vi.spyOn(await import('../../src/modules/intent-analyzer/prompts-loader.js'), 'loadPromptTemplates').mockResolvedValue({
+      intentSystem: '你是「{{business.name}}」的获客分析师。\n\n【目标人设】\n{{#each business.target_personas}}\n- {{name}}\n{{/each}}\n\n【输出 JSON】\n{"is_target_persona":true}',
+      intentUser: '评论：{{comment_text}}\n---\n输出 JSON：',
+      hookReply: '写评论回复：{{lead}}',
+      hookDm: '写私信：{{lead}}',
+    });
+
+    const { analyzeComments } = await import('../../src/modules/intent-analyzer/index.js');
     const comments: Comment[] = [
       makeComment({ cid: 'c1', user: { nickname: 'A999', uid: 'u1', follower_count: 100, signature: '' } }),
     ];
@@ -291,10 +329,39 @@ describe('analyzeComments 集成', () => {
       profile: mockProfile,
       promptsDir: './business.example/燃点-FDE/prompts',
       filterMarketing: false,
-      llmOverride: mockLLM,
+      llmOverride: { complete: mockComplete },
     });
 
     expect(result.marketingFiltered).toBe(0);
     expect(result.stats.inputComments).toBe(1);
+    loaderSpy.mockRestore();
+  });
+
+  it('filterMarketing=true 过滤营销号', async () => {
+    const mockComplete = vi.fn().mockResolvedValue(JSON.stringify([]));
+
+    vi.spyOn(await import('../../src/modules/intent-analyzer/prompts-loader.js'), 'loadPromptTemplates').mockResolvedValue({
+      intentSystem: '你是「{{business.name}}」的获客分析师。\n\n【目标人设】\n{{#each business.target_personas}}\n- {{name}}\n{{/each}}\n\n【输出 JSON】\n{"is_target_persona":true}',
+      intentUser: '评论：{{comment_text}}\n---\n输出 JSON：',
+      hookReply: '写评论回复：{{lead}}',
+      hookDm: '写私信：{{lead}}',
+    });
+
+    const { analyzeComments } = await import('../../src/modules/intent-analyzer/index.js');
+    const comments: Comment[] = [
+      makeComment({ cid: 'c1', user: { nickname: 'A999', uid: 'u1', follower_count: 100, signature: '' } }),
+      makeComment({ cid: 'c2', user: { nickname: '正常用户', uid: 'u2', follower_count: 100, signature: '' } }),
+    ];
+
+    const result = await analyzeComments(comments, {
+      profile: mockProfile,
+      promptsDir: './business.example/燃点-FDE/prompts',
+      filterMarketing: true,
+      llmOverride: { complete: mockComplete },
+    });
+
+    expect(result.marketingFiltered).toBe(1);
+    expect(result.stats.inputComments).toBe(2);
+    expect(result.stats.outputLeads).toBe(0);
   });
 });
