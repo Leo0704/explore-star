@@ -23,21 +23,53 @@ buying_stages?:                    # 购买阶段
     description: string
 
 llm:
-  provider: openai | deepseek | anthropic | ollama
+  provider: openai | deepseek | anthropic | ollama | custom
   model: string                   # 模型名
   api_key_env: string             # 环境变量名
   temperature?: number            # 默认 0.3
   max_tokens?: number             # 默认 1000
-  base_url?: string               # 自定义 API URL
+  base_url?: string               # 自定义 API URL（代理/自部署）
+  fallback?:                      # 降级链：主 provider 失败时按顺序尝试
+    - provider: openai | deepseek | anthropic | ollama | custom
+      model: string
 
 crm:
   type: feishu | notion | airtable | csv | custom
-  config:                         # CRM 连接配置
+  config:                         # CRM 连接配置（飞书举例）
+    app_id_env: string            # 飞书 App ID 环境变量名
+    app_secret_env: string        # 飞书 App Secret 环境变量名
+    table_id: string              # 多维表 table_id
+  field_mapping?:                 # 标准 Lead 字段 → CRM 字段名
+    nickname: string
+    comment: string
+    video_url: string
+    video_desc: string
+    keyword: string
+    pain_point: string
+    persona: string
+    intent_score: string
+    buying_stage: string
+    hook_reply: string
+    hook_dm: string
+    status: string
+    today_task: string
+    created_at: string
+    last_interaction: string
+    notes: string
+    execution_count: string
+    response_count: string
+    wechat_added_at: string
+    booked_at: string
+    closed_at: string
+    revenue: string
+  persona_options?: string[]      # 多选字段"人设"的可选值（飞书多维表需预定义）
+  status_options?: string[]       # 多选字段"状态"的可选值
 
 hook_config?:
   style?: string                  # 默认风格
   max_length?: number             # 最大字数（默认 30）
   language?: string              # 输出语言
+  styles?: string[]               # A/B 测试风格池（§3.11 反馈分析器评估）
 
 feedback_config?:
   auto_apply?:
@@ -53,17 +85,22 @@ feedback_config?:
 source:
   mode: sec_uid | keyword | both  # 默认 sec_uid
 
+# === 模式 B: 目标 KOL（推荐）===
+target_sec_uids:
+  sec_uids: []                    # KOL sec_uid 列表（必填，至少 5 个起步）
+    # - "MS4wLjABAAAAxxx"          # 例：KOL 1
+    # - "MS4wLjABAAAAyyy"          # 例：KOL 2
+  user_videos_limit?: number      # 默认 20（opencli 硬上限 20）
+  comment_limit?: number          # 默认 10（opencli 硬上限 10）
+
+# === 模式 A: 关键词搜索（备选）===
 search:
-  keywords:
+  keywords:                       # keyword → weight 映射
     "AI 客服":
       weight: 1.0
-  limit_per_keyword?: number      # 默认 10，上限 30
+  limit_per_keyword?: number      # 默认 10，硬上限 30
 
-target_sec_uids:
-  - "MS4wLjABAAAAxxx"             # KOL sec_uid
-  user_videos_limit?: number       # 默认 20
-  comment_limit?: number          # 默认 10
-
+# === 通用筛选 ===
 filters:
   min_likes?: number             # 默认 100
   max_age_days?: number          # 默认 30
@@ -72,8 +109,19 @@ comment_filters:
   min_length?: number            # 默认 4
   exclude_emoji_only?: boolean   # 默认 true
   exclude_punctuation_only?: boolean
-  exclude_marketing?: boolean    # 默认 true
+  exclude_marketing?: boolean    # 默认 true（由 LLM 判断，§3.3 intent-analyzer）
 ```
+
+> 注意：`target_sec_uids` 是**对象**（包含 `sec_uids` 数组），不是字符串数组。
+> 完整 KOL 列表填到 `sec_uids` 字段里，例如：
+> ```yaml
+> target_sec_uids:
+>   sec_uids:
+>     - "MS4wLjABAAAAxxxxxx"
+>     - "MS4wLjABAAAAyyyyyy"
+>   user_videos_limit: 20
+>   comment_limit: 10
+> ```
 
 ## conversion.yaml（转化配置）
 

@@ -52,7 +52,7 @@ export class FeishuCRM implements CRMAdapter {
   async updateStatus(cid: string, status: LeadStatus, note?: string): Promise<void> {
     // V1.4 简化：仅更新 status 字段（不传其他字段）
     const token = await this.getToken();
-    await fetch(`${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records`, {
+    const res = await fetch(`${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -67,6 +67,9 @@ export class FeishuCRM implements CRMAdapter {
         }],
       }),
     });
+    if (!res.ok) {
+      throw new Error(`飞书 API ${res.status}: ${await res.text()}`);
+    }
   }
 
   async listLeads(filter?: LeadFilter): Promise<Lead[]> {
@@ -97,19 +100,68 @@ export class FeishuCRM implements CRMAdapter {
       }
     }
 
-    const res = await fetch(
-      `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records`,
+    const cidField = this.config.fieldMapping['cid'] ?? 'cid';
+
+    // 1. 先用 search API 查找现有记录
+    const searchRes = await fetch(
+      `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records/search`,
       {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ records: [{ fields }] }),
+        body: JSON.stringify({
+          filter: {
+            conjunction: 'and',
+            conditions: [{
+              field_name: cidField,
+              operator: 'is',
+              value: [lead.cid],
+            }],
+          },
+          page_size: 1,
+        }),
       },
     );
-    if (!res.ok) {
-      throw new Error(`飞书 API ${res.status}: ${await res.text()}`);
+    if (!searchRes.ok) {
+      throw new Error(`飞书查询失败 ${searchRes.status}: ${await searchRes.text()}`);
+    }
+    const searchData = await searchRes.json() as { data?: { items?: Array<{ record_id: string }> } };
+    const existing = searchData?.data?.items?.[0];
+
+    if (existing) {
+      // 2a. 找到 → PATCH 更新
+      const patchRes = await fetch(
+        `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records/${existing.record_id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fields }),
+        },
+      );
+      if (!patchRes.ok) {
+        throw new Error(`飞书更新失败 ${patchRes.status}: ${await patchRes.text()}`);
+      }
+    } else {
+      // 2b. 没找到 → POST 新增
+      const postRes = await fetch(
+        `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ records: [{ fields }] }),
+        },
+      );
+      if (!postRes.ok) {
+        throw new Error(`飞书新增失败 ${postRes.status}: ${await postRes.text()}`);
+      }
     }
   }
 

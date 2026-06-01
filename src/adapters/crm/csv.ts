@@ -140,6 +140,10 @@ export class CsvCRM implements CRMAdapter {
 // ---------------------------------------------------------------------------
 
 function csvField(s: string): string {
+  // CWE-1236 防护: 首字符为公式触发字符时前置单引号
+  if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
+    s = "'" + s;
+  }
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

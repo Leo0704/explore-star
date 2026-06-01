@@ -6,6 +6,7 @@
  */
 
 import type { LLMOptions, LLMProvider } from '../../core/types.js';
+import { fetchWithRetry } from './_retry.js';
 
 export interface OpenAICompatibleOptions {
   apiKey: string;
@@ -59,7 +60,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
     }
     if (opts.stop) body.stop = opts.stop;
 
-    const res = await fetch(`${this.opts.baseUrl}/chat/completions`, {
+    const res = await fetchWithRetry(`${this.opts.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -78,7 +79,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
   }
 
   async embed(text: string): Promise<number[]> {
-    const res = await fetch(`${this.opts.baseUrl}/embeddings`, {
+    const res = await fetchWithRetry(`${this.opts.baseUrl}/embeddings`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

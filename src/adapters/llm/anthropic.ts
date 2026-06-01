@@ -6,6 +6,7 @@
  */
 
 import type { LLMOptions, LLMProvider } from '../../core/types.js';
+import { fetchWithRetry } from './_retry.js';
 
 export class AnthropicLLM implements LLMProvider {
   readonly capabilities = {
@@ -26,15 +27,38 @@ export class AnthropicLLM implements LLMProvider {
   }
 
   async complete(prompt: string, opts: LLMOptions = {}): Promise<string> {
+    // 从 prompt 中提取 system prompt（约定：systemPrompt \n\n userPrompt \n\n ...)
+    // batch.ts 使用此约定，intent-analyzer 跨 batch 的 system 完全不变，适合 caching
+    const parts = prompt.split('\n\n');
+    let systemContent: string | undefined;
+    let userContent: string;
+
+    if (parts.length >= 2) {
+      systemContent = parts[0];
+      userContent = parts.slice(1).join('\n\n');
+    } else {
+      // 没有 \n\n 约定时，整条作为 user message（向后兼容）
+      userContent = prompt;
+    }
+
     const body: Record<string, unknown> = {
       model: 'claude-3-5-sonnet-20241022',
       max_tokens: opts.maxTokens ?? 1000,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content: userContent }],
     };
+    if (systemContent) {
+      body.system = [
+        {
+          type: 'text',
+          text: systemContent,
+          cache_control: { type: 'ephemeral' },
+        },
+      ];
+    }
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
     if (opts.stop) body.stop_sequences = opts.stop;
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -86,4 +86,55 @@ describe('AirtableCRM', () => {
     delete process.env.AIRTABLE_BASE_ID;
     expect(() => new AirtableCRM({ tableName: 'Leads', fieldMapping: {} })).toThrow('AIRTABLE_BASE_ID');
   });
+
+  it('escapes formula-injection triggers in string fields on upsert (CWE-1236)', async () => {
+    // 记录 POST 时实际发出的 fields
+    let postedFields: Record<string, unknown> | undefined;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postedFields = JSON.parse(init.body as string).fields;
+        return { ok: true };
+      }
+      // queryRecords (find existing) — 返回空 records 表示要 create
+      return { ok: true, json: async () => ({ records: [] }) };
+    });
+
+    const crm = new AirtableCRM({
+      tableName: 'Leads',
+      fieldMapping: { cid: 'CID', nickname: '昵称', intent_score: 'IS' },
+    });
+
+    const malicious = {
+      cid: 'cid456',
+      nickname: '=cmd|calc',
+      intent_score: 0.9,
+      created_at: '2026-06-01T00:00:00Z',
+    };
+    await crm.syncLeads([malicious as any]);
+
+    expect(postedFields).toBeDefined();
+    expect(postedFields!['昵称']).toBe("'=cmd|calc");
+    // 数字字段不被改动
+    expect(postedFields!['IS']).toBe(0.9);
+  });
+
+  it('leaves normal string fields unescaped', async () => {
+    let postedFields: Record<string, unknown> | undefined;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postedFields = JSON.parse(init.body as string).fields;
+        return { ok: true };
+      }
+      return { ok: true, json: async () => ({ records: [] }) };
+    });
+
+    const crm = new AirtableCRM({
+      tableName: 'Leads',
+      fieldMapping: { cid: 'CID', nickname: '昵称' },
+    });
+    const lead = { ...mockLead, nickname: '正常文本' };
+    await crm.syncLeads([lead as any]);
+
+    expect(postedFields!['昵称']).toBe('正常文本');
+  });
 });

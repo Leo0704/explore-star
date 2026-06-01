@@ -7,6 +7,7 @@
  */
 
 import type { LLMOptions, LLMProvider } from '../../core/types.js';
+import { fetchWithRetry } from './_retry.js';
 
 export class OllamaLLM implements LLMProvider {
   readonly capabilities = {
@@ -37,7 +38,7 @@ export class OllamaLLM implements LLMProvider {
     if (opts.maxTokens) body.options = { num_predict: opts.maxTokens };
     if (opts.stop) body.options = { ...(body.options as object), stop: opts.stop };
 
-    const res = await fetch(`${this.baseUrl}/api/chat`, {
+    const res = await fetchWithRetry(`${this.baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -53,7 +54,7 @@ export class OllamaLLM implements LLMProvider {
   }
 
   async embed(text: string): Promise<number[]> {
-    const res = await fetch(`${this.baseUrl}/api/embeddings`, {
+    const res = await fetchWithRetry(`${this.baseUrl}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: this.model, prompt: text }),

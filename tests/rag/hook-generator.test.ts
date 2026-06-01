@@ -147,10 +147,86 @@ describe('generateHook 钩子生成', () => {
     expect((lead as any).hook_style).toBeTruthy();
   });
 
-  it('weekly-insights.json 存在时使用最优风格', async () => {
-    // 这个测试需要 fs mock，比较复杂
-    // 简化为验证逻辑路径存在
-    expect(true).toBe(true);
+  it('weekly-insights.json 存在时使用最优风格（tested >= 3 + 最高 rate）', async () => {
+    // 重置模块 + doMock 让 mock 仅对本次 generateHook 导入生效
+    vi.doMock('node:fs/promises', async () => {
+      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+      return {
+        ...actual,
+        readFile: vi.fn(async (path: string, enc?: string) => {
+          if (path === './data/feedback/weekly-insights.json') {
+            return JSON.stringify({
+              week_start: '2026-06-01',
+              learning_period_complete: true,
+              hook_style_performance: [
+                { style: '朋友推荐', tested: 5, replied: 1, rate: 0.2 },
+                { style: '数据驱动', tested: 10, replied: 8, rate: 0.8 },
+                { style: '顾问风格', tested: 4, replied: 2, rate: 0.5 },
+              ],
+            });
+          }
+          return actual.readFile(path as never, enc as never);
+        }),
+      };
+    });
+    vi.resetModules();
+
+    const { generateHook: freshGenerateHook } = await import('../../src/rag/hook-generator.js');
+
+    const lead = makeLead();
+    const mockLLM = vi.fn().mockResolvedValue('测试钩子话术');
+    vi.spyOn(await import('../../src/adapters/registry.js'), 'getLLM').mockReturnValue({
+      complete: mockLLM,
+    } as any);
+
+    const result = await freshGenerateHook(mockProfile, lead, 'reply', opts);
+
+    // 最高 rate 是 "数据驱动" (0.8)，且全部 tested >= 3
+    expect(result.hookStyle).toBe('数据驱动');
+    // 同时应写回 lead.hook_style
+    expect((lead as any).hook_style).toBe('数据驱动');
+
+    vi.doUnmock('node:fs/promises');
+    vi.resetModules();
+  });
+
+  it('weekly-insights.json 存在但所有 style tested < 3 时回退到默认', async () => {
+    // 边界条件：tested 不足时不采纳最优风格，使用默认
+    vi.doMock('node:fs/promises', async () => {
+      const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+      return {
+        ...actual,
+        readFile: vi.fn(async (path: string, enc?: string) => {
+          if (path === './data/feedback/weekly-insights.json') {
+            return JSON.stringify({
+              week_start: '2026-06-01',
+              hook_style_performance: [
+                { style: '高率但样本不足', tested: 2, replied: 2, rate: 1.0 },
+                { style: '高率但样本不足2', tested: 1, replied: 1, rate: 1.0 },
+              ],
+            });
+          }
+          return actual.readFile(path as never, enc as never);
+        }),
+      };
+    });
+    vi.resetModules();
+
+    const { generateHook: freshGenerateHook } = await import('../../src/rag/hook-generator.js');
+
+    const lead = makeLead();
+    const mockLLM = vi.fn().mockResolvedValue('测试钩子话术');
+    vi.spyOn(await import('../../src/adapters/registry.js'), 'getLLM').mockReturnValue({
+      complete: mockLLM,
+    } as any);
+
+    const result = await freshGenerateHook(mockProfile, lead, 'reply', opts);
+
+    // tested < 3 全部被过滤 → 回退到 profile.hook_config.style
+    expect(result.hookStyle).toBe('像朋友推荐，不像销售');
+
+    vi.doUnmock('node:fs/promises');
+    vi.resetModules();
   });
 });
 

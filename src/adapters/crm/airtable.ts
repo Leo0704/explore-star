@@ -60,7 +60,7 @@ export class AirtableCRM implements CRMAdapter {
     const fields: Record<string, unknown> = {
       [this.fieldMap('status')]: status,
     };
-    if (note) fields[this.fieldMap('notes')] = note;
+    if (note) fields[this.fieldMap('notes')] = escapeFormula(note);
 
     await this.patchRecord(record.id, fields);
   }
@@ -112,9 +112,10 @@ export class AirtableCRM implements CRMAdapter {
     const fields: Record<string, unknown> = {};
     for (const [stdField, airtableField] of Object.entries(this.fieldMapping)) {
       const v = (lead as unknown as Record<string, unknown>)[stdField];
-      if (v !== undefined && v !== null && v !== '') {
-        fields[airtableField] = v;
-      }
+      if (v === undefined || v === null || v === '') continue;
+      // CWE-1236 防护: string 字段首字符为公式触发符时前置单引号
+      // (number / boolean / 对象类型不需要转义)
+      fields[airtableField] = typeof v === 'string' ? escapeFormula(v) : v;
     }
     return fields;
   }
@@ -179,4 +180,17 @@ export class AirtableCRM implements CRMAdapter {
     }
     return result as unknown as Lead;
   }
+}
+
+// ---------------------------------------------------------------------------
+// 工具：Airtable 字段转义（CWE-1236 formula injection 防御）
+// ---------------------------------------------------------------------------
+
+function escapeFormula(s: string): string {
+  // Airtable web UI 打开 formula 字段时,首字符 =/+/-/@/TAB/CR 会触发公式求值;
+  // 前置单引号可强制视为字面量。API 端本身不会求值,但作为防御性写。
+  if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
+    return "'" + s;
+  }
+  return s;
 }

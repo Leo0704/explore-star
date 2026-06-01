@@ -8,7 +8,7 @@
  *   - getResumePoint: 获取恢复点
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -60,12 +60,14 @@ export async function loadState(): Promise<PipelineState> {
 }
 
 /**
- * 保存状态
+ * 保存状态（原子写：tmp + rename）
  */
 export async function saveState(state: PipelineState): Promise<void> {
   state.lastUpdatedAt = new Date().toISOString();
   await mkdir(dirname(STATE_FILE), { recursive: true });
-  await writeFile(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+  const tmp = `${STATE_FILE}.tmp.${process.pid}`;
+  await writeFile(tmp, JSON.stringify(state, null, 2), 'utf-8');
+  await rename(tmp, STATE_FILE);
 }
 
 /**

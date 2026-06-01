@@ -128,6 +128,43 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   }
   console.log(`[run-daily] 生成 ${leads.length} 个高意向 lead`);
 
+  // 5.5 RAG 钩子生成（§3.4 / §3.7 步骤 [1.6]）
+  // 用知识库 + 反馈驱动风格替换 intent analyzer 生成的通用钩子
+  if (leads.length > 0) {
+    try {
+      const { getEmbedding } = await import('../adapters/registry.js');
+      const embeddingProvider = getEmbedding('openai');
+      const { generateHook } = await import('../rag/hook-generator.js');
+
+      let ragSuccess = 0;
+      for (const lead of leads) {
+        try {
+          const ragOpts = {
+            profile,
+            promptsDir: loaded.promptsDir,
+            knowledgeDir: loaded.knowledgeDir,
+            dbPath: './data/vectors.db',
+            embeddingProvider,
+          };
+          // reply 钩子（评论回复用）
+          const replyResult = await generateHook(profile, lead, 'reply', ragOpts);
+          lead.suggested_reply_hook = replyResult.hook;
+          // dm 钩子（私信用）
+          const dmResult = await generateHook(profile, lead, 'dm', ragOpts);
+          lead.suggested_dm_hook = dmResult.hook;
+          lead.hook_style = replyResult.hookStyle;
+          ragSuccess++;
+        } catch {
+          // 单个 lead RAG 失败不影响其他，保留 intent analyzer 的钩子
+        }
+      }
+      console.log(`[run-daily] RAG 钩子生成：${ragSuccess}/${leads.length} 成功`);
+    } catch {
+      // embedding adapter 未注册 → 冷启动，跳过 RAG，保留 intent analyzer 的钩子
+      console.log(`[run-daily] RAG 跳过（embedding adapter 未配置）`);
+    }
+  }
+
   // 6. CRM 同步
   await updateStep(2, 'running');
   if (leads.length > 0 && !opts.dryRun) {
@@ -350,9 +387,9 @@ async function readFileFromPrompts(promptsDir: string, filename: string): Promis
   return '';
 }
 
-async function createCRM(_profile: import('../core/types.js').BusinessProfile) {
-  const { CsvCRM } = await import('../adapters/crm/csv.js');
-  return new CsvCRM('./data/leads.csv');
+async function createCRM(profile: import('../core/types.js').BusinessProfile) {
+  const { getCRM } = await import('../adapters/registry.js');
+  return getCRM(profile.crm.type);
 }
 
 // ---------------------------------------------------------------------------
