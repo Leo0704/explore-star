@@ -64,7 +64,7 @@ export function buildTask(
   _generateHookFn?: (profile: BusinessProfile, lead: Lead, hookType: 'reply' | 'dm') => string | Promise<string>
 ): Task | null {
   // 0. 前置检查
-  if ((lead as any).opt_out) return null;
+  if (lead.opt_out) return null;
   if (lead.status === '已流失') return null;
   if (lead.status === '已成交') return null;
   if (lead.status === '已加微') return null;  // 交给 §3.10 转化引擎

@@ -168,7 +168,8 @@ export type LeadStatus =
   | '已成交'
   | '已流失'
   | '沉默'
-  | '已再激活';
+  | '已再激活'
+  | (string & {});  // 支持 conversion.yaml 中业务方自定义状态（如 '已诊断' '已试用'）
 
 export interface Lead {
   // 身份
@@ -207,6 +208,10 @@ export interface Lead {
     at: string;                         // ISO 8601
     note?: string;
   }>;
+
+  // 用户拒绝标记（§3.6.3 opt_out 检测）
+  /** 用户明确拒绝（私信中说"不需要"/"别发了"等），立即停止所有后续任务 */
+  opt_out?: boolean;
 
   // 互动效果感知（§3.6.2）
   last_task_executed_at?: string;
