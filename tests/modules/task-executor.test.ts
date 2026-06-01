@@ -10,10 +10,10 @@ import {
   isEmergencyStop,
   throwIfEmergencyStop,
   createRateLimiter,
-  executeBrowserAction,
-  reviewHook,
   executeTasks,
+  reviewHook,
 } from '../../src/modules/task-executor/index.js';
+import { executeBrowserAction } from '../../src/modules/task-executor/browser-actions.js';
 import type { Task, SafetyConfig } from '../../src/core/types.js';
 
 const mockConfig: SafetyConfig = {
