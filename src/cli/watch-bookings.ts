@@ -39,7 +39,7 @@ export async function runWatchBookings(args: string[]): Promise<void> {
   // loaded 目前未被直接使用，但保留接口一致性
 
   // CRM
-  const crm = getCRM();
+  const crm = getCRM('csv');
 
   console.log(`[watch-bookings] 启动预约监听 | business=${businessDir} | poll=${pollInterval}ms`);
   console.log('  按 Ctrl+C 终止\n');

@@ -1,7 +1,9 @@
 {
+  "_comment": "探星安全配置（§5）",
   "rate_limits": {
     "douyin.search.calls_per_hour": 10,
     "douyin.user_videos.calls_per_hour": 30,
+    "douyin.comment.calls_per_hour": 60,
     "douyin.friend_request.per_day": 5,
     "douyin.dm.per_day": 10,
     "opencli.min_interval_seconds": 3,
@@ -11,7 +13,9 @@
     "videos": 50,
     "comments_scanned": 5000,
     "leads_created": 200,
-    "engagement_actions": 20
+    "engagement_actions": 20,
+    "friend_requests": 5,
+    "dms": 10
   },
   "emergency_stop": "config/EMERGENCY_STOP",
   "fatal_signals": [
@@ -19,5 +23,10 @@
     "captcha_triggered_3_times_in_1h",
     "private_msg_rejected_2_times",
     "ip_changed_5_times"
-  ]
+  ],
+  "hook_review": {
+    "enabled": false,
+    "review_before_execute": true,
+    "auto_apply_after_weeks": 2
+  }
 }

@@ -38,7 +38,7 @@ export async function runConversionReport(args: string[]): Promise<void> {
   const { profile, conversion } = loaded;
 
   // CRM
-  const crm = getCRM();
+  const crm = getCRM('csv');
 
   // 生成报告
   const report = await generateConversionReport(date, { profile, conversion, crm });

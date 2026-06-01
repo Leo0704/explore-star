@@ -31,20 +31,18 @@ export function computeTouchpointAttribution(events: LeadEvent[]): TouchpointAtt
   const byType: Record<string, { sent: number; opened: number; replied: number; booked: number; no_response: number }> = {};
 
   for (const e of events) {
-    // 跳过非 touchpoint 事件
-    if (e.event !== 'touchpoint_sent' && e.event !== 'touchpoint_result') continue;
-
     const type = (e as any).touchpoint_type ?? 'unknown';
     if (!byType[type]) byType[type] = { sent: 0, opened: 0, replied: 0, booked: 0, no_response: 0 };
 
-    if (e.event === 'touchpoint_sent') {
-      byType[type].sent++;
-    } else if (e.event === 'touchpoint_result') {
+    // Count based on presence of fields (touchpoint events have extra fields)
+    if ((e as any).touchpoint_result) {
       const result = (e as any).touchpoint_result;
       if (result === 'opened') byType[type].opened++;
       else if (result === 'replied') byType[type].replied++;
       else if (result === 'booked') byType[type].booked++;
       else if (result === 'no_response') byType[type].no_response++;
+    } else if ((e as any).touchpoint_type) {
+      byType[type].sent++;
     }
   }
 

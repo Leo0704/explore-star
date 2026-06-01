@@ -10,8 +10,8 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { getNotifier, getCRM, getChannel, listLLMs } from '../../adapters/registry.js';
-import { loadBusinessProfile } from '../../core/business-profile.js';
+import { getNotifier, getCRM, getChannel, listLLMs } from '../adapters/registry.js';
+import { loadBusinessProfile } from '../core/business-profile.js';
 
 export type HealthStatus = 'ok' | 'warning' | 'critical' | 'error';
 
@@ -123,7 +123,7 @@ export async function checkAdapterHealth(): Promise<HealthCheckResult> {
 
   // CRM 检查
   try {
-    const crm = getCRM();
+    const crm = getCRM('csv');
     if (crm) {
       const ok = await crm.ping();
       checks.push({ name: 'crm', status: ok ? 'ok' : 'warning', message: ok ? 'CRM 连通正常' : 'CRM ping 失败' });

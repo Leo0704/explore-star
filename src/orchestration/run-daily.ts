@@ -100,10 +100,17 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
       const userTpl = await readFileFromPrompts(loaded.promptsDir, 'intent-user.md');
       const llm = opts.injectLLM ?? (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
 
+      const batchCtx: import('../modules/intent-analyzer/batch.js').BatchContext = {
+        profile,
+        systemPrompt,
+        userTplStr: userTpl,
+        llm,
+        threshold: 0.7,
+      };
       const batchSize = 10;
       for (let i = 0; i < filtered.length; i += batchSize) {
         const batch = filtered.slice(i, i + batchSize);
-        const result = await analyzeBatch(profile, batch, systemPrompt, userTpl, llm, 0.7);
+        const result = await analyzeBatch(batch, batchCtx);
         leads.push(...result.leads);
         result.rejected.forEach(r => errors.push(`[reject] ${r.cid}: ${r.reason}`));
       }

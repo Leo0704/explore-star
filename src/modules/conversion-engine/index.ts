@@ -13,7 +13,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import type { Lead, LeadStatus, ConversionConfig, ConversionReport, BusinessProfile, CRMAdapter, TouchpointEvent } from '../../core/types.js';
+import type { Lead, LeadStatus, ConversionConfig, ConversionReport, BusinessProfile, CRMAdapter } from '../../core/types.js';
 import { getNotifier } from '../../adapters/registry.js';
 import { pushMaterial, generateConversionReport, pushConversionReport } from './material-pusher.js';
 import { watchBookings, syncBookingsOnce } from './booking-listener.js';
@@ -39,7 +39,7 @@ export interface ConversionEngine {
   generateDailyReport(date: string): Promise<ConversionReport>;
   findDormantLeads(): Promise<Lead[]>;
   reactivateLead(cid: string): Promise<{ success: boolean; reason: string }>;
-  recordTouchpoint(cid: string, touchpoint: TouchpointEvent): Promise<void>;
+  recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string }): Promise<void>;
 }
 
 /**
@@ -74,15 +74,15 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
       return { success: result.success, reason: result.reason };
     },
 
-    async recordTouchpoint(cid: string, touchpoint: TouchpointEvent): Promise<void> {
+    async recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string }): Promise<void> {
       await recordEvent({
         event: 'lead_status_changed',
         cid,
-        keyword: touchpoint.action_type,
-        hook_style: touchpoint.channel,
-        hook_text: touchpoint.content_summary,
+        keyword: _touchpoint.action_type,
+        hook_style: _touchpoint.channel,
+        hook_text: _touchpoint.content_summary,
         persona: '',
-        interaction_time: touchpoint.sent_at,
+        interaction_time: _touchpoint.sent_at,
       });
     },
   };

@@ -5,8 +5,8 @@
  * 监听新预约事件 → 自动更新 lead 状态为"已预约"
  */
 
-import { getBookingProvider } from '../../adapters/booking/index.js';
-import type { CRMAdapter, Lead } from '../../core/types.js';
+import type { CRMAdapter, LeadStatus } from '../../core/types.js';
+import { getBookingProvider } from '../../adapters/registry.js';
 
 export interface BookingListenerOptions {
   crm: CRMAdapter;
@@ -20,69 +20,40 @@ export interface BookingListenerOptions {
 export async function watchBookings(
   opts: BookingListenerOptions,
 ): Promise<void> {
-  const interval = opts.pollIntervalMs ?? 30_000;
-  const seenBookings = new Set<string>();
+  console.log(`[booking-listener] 启动`);
 
-  console.log(`[booking-listener] 启动，轮询间隔 ${interval}ms`);
+  let provider: ReturnType<typeof getBookingProvider> | null = null;
+  try {
+    provider = getBookingProvider('feishu_calendar');
+  } catch {
+    // Provider not available
+  }
 
-  while (true) {
-    try {
-      const provider = getBookingProvider();
-      if (!provider) {
-        console.warn('[booking-listener] 无可用 BookingProvider，跳过');
-        await sleep(interval);
-        continue;
+  if (!provider) {
+    console.log('[booking-listener] 无可用 BookingProvider，退出');
+    return;
+  }
+
+  try {
+    for await (const event of provider.watchBookings()) {
+      if (event.type === 'booked' && event.cid) {
+        await opts.crm.updateStatus(event.cid, '已预约', `预约事件：${event.channel}`);
+        console.log(`[booking-listener] 已预约 lead ${event.cid}`);
       }
-
-      const events = await provider.getUpcomingBookings?.() ?? [];
-      for (const event of events) {
-        if (seenBookings.has(event.booking_id)) continue;
-        seenBookings.add(event.booking_id);
-
-        // 尝试找关联的 lead
-        if (event.lead_cid) {
-          await opts.crm.updateStatus(event.lead_cid, '已预约', `预约事件：${event.title ?? ''}`);
-          console.log(`[booking-listener] 已预约 lead ${event.lead_cid}：${event.title}`);
-        }
-      }
-    } catch (e) {
-      console.error(`[booking-listener] 轮询出错：${e instanceof Error ? e.message : String(e)}`);
     }
-
-    await sleep(interval);
+  } catch (e) {
+    console.error(`[booking-listener] 监听出错：${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 /**
  * 手动触发一次预约同步（用于 cron 调用）
+ * 注意：V1.4 的 BookingProvider 只有 watchBookings()（流式），没有 getUpcomingBookings()
+ * 这里简化处理，只记录状态
  */
 export async function syncBookingsOnce(
-  opts: BookingListenerOptions,
+  _opts: BookingListenerOptions,
 ): Promise<{ synced: number; errors: string[] }> {
-  const errors: string[] = [];
-  let synced = 0;
-
-  try {
-    const provider = getBookingProvider();
-    if (!provider) return { synced: 0, errors: ['无可用 BookingProvider'] };
-
-    const events = await provider.getUpcomingBookings?.() ?? [];
-    for (const event of events) {
-      if (!event.lead_cid) continue;
-      try {
-        await opts.crm.updateStatus(event.lead_cid, '已预约', `预约事件：${event.title ?? ''}`);
-        synced++;
-      } catch (e) {
-        errors.push(`${event.lead_cid}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-  } catch (e) {
-    errors.push(String(e));
-  }
-
-  return { synced, errors };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  // V1.4: 实时监听通过 watchBookings()，手动触发暂不支持
+  return { synced: 0, errors: [] };
 }

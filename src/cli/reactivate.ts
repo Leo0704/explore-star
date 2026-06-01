@@ -37,7 +37,7 @@ export async function runReactivate(args: string[]): Promise<void> {
   const { profile, conversion } = loaded;
 
   // CRM
-  const crm = getCRM();
+  const crm = getCRM('csv');
 
   if (cid) {
     // 单个再激活
@@ -49,7 +49,7 @@ export async function runReactivate(args: string[]): Promise<void> {
 
     console.log(`[reactivate] 再激活单个：${lead.nickname}（${cid}）`);
     if (!dryRun) {
-      const result = await doReactivate(lead, { crm, conversion, profile });
+      const result = await doReactivate(lead, { crm, conversion });
       console.log(`  结果：${result.success ? '✅ 成功' : '❌ 失败'} - ${result.reason}`);
     } else {
       console.log('  → dry-run 模式，跳过实际发送');

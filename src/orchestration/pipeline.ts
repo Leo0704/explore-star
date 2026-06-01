@@ -159,7 +159,7 @@ async function stepTaskGeneration(_opts: PipelineOptions): Promise<unknown> {
 
 async function stepExecution(_opts: PipelineOptions): Promise<unknown> {
   // V1.4: 任务执行暂不自动（需人工触发或 task-executor）
-  if (opts.dryRun) return { executed: false, reason: 'dry-run 模式' };
+  if (_opts.dryRun) return { executed: false, reason: 'dry-run 模式' };
   return { executed: false, reason: 'V1.4 任务执行需人工或 task-executor' };
 }
 

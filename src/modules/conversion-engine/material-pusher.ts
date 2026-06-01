@@ -36,7 +36,7 @@ export async function pushMaterial(
   if (elapsed < delayMs) {
     return { pushed: false, reason: `未到 ${delayMs / 3600000}h 延迟（已 ${(elapsed / 3600000).toFixed(1)}h）` };
   }
-  if (lead.status !== '已加微' && lead.status !== '已私信') {
+  if (lead.status !== '已加微' && lead.status !== '已加好友') {
     return { pushed: false, reason: `状态已变更为 ${lead.status}，不再推送物料` };
   }
   if (!opts.conversion.post_add_asset) {

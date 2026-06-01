@@ -41,7 +41,7 @@ export async function runNurture(args: string[]): Promise<void> {
   const { profile, conversion } = loaded;
 
   // 从 CRM 读取 leads
-  const crm = getCRM();
+  const crm = getCRM('csv');
   const allLeads = await crm.listLeads({ has_open_task: true });
 
   // 生成任务

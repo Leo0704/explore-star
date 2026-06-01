@@ -8,7 +8,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getLLM } from '../adapters/registry.js';
-import { analyzeBatch } from '../modules/intent-analyzer/index.js';
+import { analyzeComments } from '../modules/intent-analyzer/index.js';
 
 const USAGE = `
 用法:
@@ -44,23 +44,19 @@ export async function runAnalyze(args: string[]): Promise<void> {
 
   // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
-  const { profile } = loaded;
-
-  // 加载 prompts
-  const { readFile: rf } = await import('node:fs/promises');
-  const { join } = await import('node:path');
-  const systemPrompt = await rf(join(loaded.promptsDir, 'intent-system.md'), 'utf-8');
-  const userTpl = await rf(join(loaded.promptsDir, 'intent-user.md'), 'utf-8');
-
-  // LLM
-  const llm = getLLM(profile.llm.provider);
 
   // 分析
-  const result = await analyzeBatch(profile, comments, systemPrompt, userTpl, llm, threshold);
+  const result = await analyzeComments(comments, {
+    profile: loaded.profile,
+    promptsDir: loaded.promptsDir,
+    threshold,
+    llmOverride: getLLM(loaded.profile.llm.provider),
+  });
 
   console.log(`[analyze] 分析完成：${result.leads.length} 个高意向 lead（阈值 ${threshold}）`);
   console.log(`  通过：${result.leads.length}`);
   console.log(`  拒绝：${result.rejected.length}`);
+  console.log(`  营销过滤：${result.marketingFiltered}`);
 
   if (!dryRun && outputPath) {
     const { writeFile } = await import('node:fs/promises');
