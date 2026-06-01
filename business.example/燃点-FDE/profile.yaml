@@ -1,0 +1,103 @@
+# 燃点 FDE 业务画像（脱敏示例）
+#
+# 本文件是「business.example/燃点-FDE/」下的示例配置——
+# 展示**作者的真实业务**如何用探星框架。
+#
+# 业务方在 init 后，应该把整个目录复制为 business-<你的业务名>/，
+# 然后**只改这 3-5 个字段**为自己的业务：
+#   - business.name
+#   - business.value_prop
+#   - target_personas
+#   - intent_signals
+#   - crm.type / crm.config
+
+business:
+  name: "燃点 FDE"
+  value_prop: "派工程师到企业现场做定制化 AI 落地"
+  description: |
+    燃点 FDE 是一家 OPC 一人公司，专为小微企业提供
+    「工程师驻场定制化 AI 落地」服务。已积累 30+ 企业客户、
+    6 周交付、98% 复购率。
+
+target_personas:
+  - id: self_media
+    name: "自媒体矩阵"
+    description: "做多账号内容生产的小团队或工作室（5-50 万粉）"
+    typical_pain_points:
+      - "AI 剪辑能不能省人工"
+      - "AI 写脚本质量不稳定"
+      - "多账号分发太耗时"
+    value_score: 9.5  # 由 §3.11 自动调整
+
+  - id: ecommerce
+    name: "电商"
+    description: "电商品牌方/操盘手，5-50 人团队，年 GMV 500 万-5 亿"
+    typical_pain_points:
+      - "AI 客服回复太机械"
+      - "AI 生成商品图过不了审核"
+      - "多语言跨境文案成本高"
+    value_score: 4.0
+
+  - id: online_edu
+    name: "在线教育"
+    description: "K12 或成人教育公司，20-200 人教研团队"
+    typical_pain_points:
+      - "AI 出题质量不达标"
+      - "AI 助教答非所问"
+      - "学员反馈响应慢"
+    value_score: 6.0
+
+intent_signals:
+  - "AI 工具"
+  - "自动化"
+  - "降本增效"
+  - "小团队"
+  - "求推荐"
+
+buying_stages:
+  - id: awareness
+    name: "刚意识到问题"
+    description: "表达困惑、刚遇到问题、不知道有 AI 解决方案"
+  - id: consideration
+    name: "在调研比价"
+    description: "在找 AI 工具、在比价、问别人推荐"
+  - id: decision
+    name: "准备找人"
+    description: "明确要做、问报价、问工期、预算已就绪"
+
+llm:
+  provider: deepseek
+  model: deepseek-v3
+  api_key_env: DEEPSEEK_API_KEY
+  temperature: 0.3
+  max_tokens: 1000
+  # 降级链（主 provider 失败时按顺序尝试）
+  fallback:
+    - provider: openai
+      model: gpt-4o-mini
+
+crm:
+  type: feishu
+  # field_mapping 见 crm.yaml（更细的字段映射）
+  # 这里只放最小连接信息
+  config:
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    table_id: "FDE意向客户池"
+
+hook_config:
+  style: "朋友推荐，不像销售"
+  max_length: 30
+  language: "中文"
+  # A/B 测试风格池（§3.11 反馈分析器会评估）
+  styles:
+    - "朋友推荐"
+    - "顾问"
+    - "案例引用"
+
+feedback_config:
+  auto_apply:
+    keyword_weight: true       # 关键词权重可自动调
+    hook_style: false          # 钩子风格必须手动确认
+    persona_value: false       # persona 价值必须手动确认
+    interaction_time: false    # 互动时段必须手动确认

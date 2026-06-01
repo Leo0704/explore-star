@@ -1,0 +1,177 @@
+/**
+ * 本地 CSV CRM Adapter（§3.5）
+ *
+ * 零配置、开发/调试用。生产推荐用 feishu / notion / airtable。
+ *
+ * 存储路径：./data/leads.csv
+ *
+ * CSV 列：所有 Lead 字段 + standard mapping
+ */
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
+const COLUMNS = [
+    'cid', 'source', 'aweme_id', 'video_url', 'video_desc', 'keyword',
+    'nickname', 'user_signature', 'follower_count', 'user_uid',
+    'comment_text', 'comment_digg_count', 'comment_create_time',
+    'is_target_persona', 'persona', 'pain_point', 'intent_score', 'buying_stage',
+    'suggested_reply_hook', 'suggested_dm_hook',
+    'status', 'last_task_executed_at', 'last_task_result', 'last_response_text',
+    'execution_count', 'response_count',
+    'wechat_added_at', 'booked_at', 'closed_at', 'revenue', 'last_interaction_at',
+    'created_at', 'updated_at', 'notes',
+];
+export class CsvCRM {
+    csvPath;
+    constructor(csvPath = './data/leads.csv') {
+        this.csvPath = csvPath;
+    }
+    async syncLeads(leads) {
+        const existing = await this.readAll();
+        const byCid = new Map(existing.map(l => [l.cid, l]));
+        let synced = 0;
+        const errors = [];
+        for (const lead of leads) {
+            try {
+                byCid.set(lead.cid, lead);
+                synced++;
+            }
+            catch (e) {
+                errors.push({ cid: lead.cid, error: String(e) });
+            }
+        }
+        await this.writeAll([...byCid.values()]);
+        return { synced, failed: errors.length, errors };
+    }
+    async getLead(cid) {
+        const all = await this.readAll();
+        return all.find(l => l.cid === cid) ?? null;
+    }
+    async updateStatus(cid, status, note) {
+        const all = await this.readAll();
+        const lead = all.find(l => l.cid === cid);
+        if (!lead)
+            throw new Error(`Lead ${cid} not found`);
+        const from = lead.status;
+        lead.status = status;
+        lead.status_history.push({
+            from, to: status, at: new Date().toISOString(), note,
+        });
+        lead.updated_at = new Date().toISOString();
+        await this.writeAll(all);
+    }
+    async listLeads(filter) {
+        let all = await this.readAll();
+        if (!filter)
+            return all;
+        if (filter.status) {
+            const s = new Set(filter.status);
+            all = all.filter(l => s.has(l.status));
+        }
+        if (filter.persona) {
+            const p = new Set(filter.persona);
+            all = all.filter(l => p.has(l.persona));
+        }
+        if (filter.intent_score_gte !== undefined) {
+            const min = filter.intent_score_gte;
+            all = all.filter(l => l.intent_score >= min);
+        }
+        if (filter.created_after) {
+            const after = filter.created_after;
+            all = all.filter(l => l.created_at >= after);
+        }
+        if (filter.has_open_task) {
+            // 简化为 status ∈ ['新发现', '已关注', '已互动', '已加好友', '已加微']
+            const open = ['新发现', '已关注', '已互动', '已加好友', '已加微'];
+            all = all.filter(l => open.includes(l.status));
+        }
+        return all;
+    }
+    async ping() {
+        try {
+            await this.readAll();
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    // -------------------------------------------------------------------------
+    // 内部：CSV 读写
+    // -------------------------------------------------------------------------
+    async readAll() {
+        try {
+            const raw = await readFile(this.csvPath, 'utf-8');
+            const lines = raw.split('\n').filter(Boolean);
+            if (lines.length < 2)
+                return [];
+            const header = lines[0].split(',');
+            return lines.slice(1).map(line => {
+                const values = parseCsvLine(line);
+                const obj = {};
+                for (let i = 0; i < header.length; i++) {
+                    obj[header[i]] = values[i];
+                }
+                return obj;
+            });
+        }
+        catch (e) {
+            if (e.code === 'ENOENT')
+                return [];
+            throw e;
+        }
+    }
+    async writeAll(leads) {
+        await mkdir(dirname(this.csvPath), { recursive: true });
+        const header = COLUMNS.join(',');
+        const lines = leads.map(l => COLUMNS.map(c => csvField(String(l[c] ?? ''))).join(','));
+        await writeFile(this.csvPath, [header, ...lines].join('\n'), 'utf-8');
+    }
+}
+// ---------------------------------------------------------------------------
+// 工具：CSV 字段转义
+// ---------------------------------------------------------------------------
+function csvField(s) {
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+}
+function parseCsvLine(line) {
+    const out = [];
+    let i = 0, cur = '', inQuote = false;
+    while (i < line.length) {
+        const ch = line[i];
+        if (inQuote) {
+            if (ch === '"' && line[i + 1] === '"') {
+                cur += '"';
+                i += 2;
+                continue;
+            }
+            if (ch === '"') {
+                inQuote = false;
+                i++;
+                continue;
+            }
+            cur += ch;
+            i++;
+        }
+        else {
+            if (ch === '"') {
+                inQuote = true;
+                i++;
+                continue;
+            }
+            if (ch === ',') {
+                out.push(cur);
+                cur = '';
+                i++;
+                continue;
+            }
+            cur += ch;
+            i++;
+        }
+    }
+    out.push(cur);
+    return out;
+}
+//# sourceMappingURL=csv.js.map

@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+dist/
+build/
+
+# Data and logs (regenerated)
+data/
+logs/
+backups/
+*.log
+
+# Emergency stop
+config/EMERGENCY_STOP
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Test
+coverage/

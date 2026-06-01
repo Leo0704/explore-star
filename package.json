@@ -1,0 +1,50 @@
+{
+  "name": "explore-star",
+  "version": "0.1.0",
+  "description": "抖音评论截流自动化框架（探星）—— 通过 OpenCLI + LLM 自动发现潜在客户，提供从「侦察 → 引导 → 转化 → 反馈」全流程编排支持。",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "explore-star": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "run": "node dist/orchestration/run-daily.js",
+    "init": "node dist/cli/init.js",
+    "doctor": "node dist/cli/doctor.js",
+    "search": "node dist/cli/search.js",
+    "analyze": "node dist/cli/analyze.js",
+    "nurture": "node dist/cli/nurture.js",
+    "convert": "node dist/cli/convert.js",
+    "insights": "node dist/cli/insights.js"
+  },
+  "keywords": [
+    "douyin",
+    "tiktok",
+    "lead-generation",
+    "opencli",
+    "llm",
+    "automation"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1",
+    "zod": "^3.23.8",
+    "better-sqlite3": "^11.3.0",
+    "sqlite-vec": "^0.1.0-alpha.10",
+    "handlebars": "^4.7.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5",
+    "@types/node": "^22.9.0",
+    "@types/better-sqlite3": "^7.6.11"
+  }
+}
