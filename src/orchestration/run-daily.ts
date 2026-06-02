@@ -17,11 +17,12 @@ import { existsSync } from 'node:fs';
 
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getChannel, getNotifier } from '../adapters/registry.js';
-import type { Comment, Lead, Task } from '../core/types.js';
+import type { Comment, Lead, Notifier, BusinessProfile, Task } from '../core/types.js';
 import { executeTasks, loadSafetyConfig, type ExecutionResult, type SafetyConfig } from '../modules/task-executor/index.js';
 import { loadState, updateStep, markComplete, resetForNewDay } from './state.js';
 import { logger } from '../core/logger.js';
 import { appendRunHistory, type RunHistoryEntry } from './run-history.js';
+import { resolveNotifiers as defaultResolveNotifiers } from '../core/notifier-resolver.js';
 
 const log = logger.child({ module: 'run-daily' });
 
@@ -46,6 +47,10 @@ export interface RunDailyOptions {
   injectHistoryPath?: string;
   /** 测试注入：是否写 history（默认 true；测试可关） */
   injectWriteHistory?: boolean;
+  /** 测试注入：覆盖 notifier 列表（默认从 observability 配置读） */
+  injectNotifiers?: Notifier[];
+  /** 测试注入：覆盖 notifier 解析函数 */
+  injectResolveNotifiers?: (profile: BusinessProfile) => Notifier[];
 }
 
 export interface RunDailyResult {
@@ -132,6 +137,15 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   } catch (e) {
     if (e instanceof LoginRequiredError) {
       exitReason = 'login_required';
+      // 立即通知（不等 finally）—— LoginRequiredError 是 R1 fail-loud 信号
+      const notifiers = opts.injectNotifiers ?? await loadAndResolveNotifiers(opts);
+      for (const n of notifiers) {
+        await sendWithTimeout(n, {
+          title: '探星：需要登录抖音',
+          body: `业务 ${opts.businessDir} 的 run 在 ${new Date().toISOString()} 触发 LoginRequiredError。\n请检查 opencli / Chrome 登录态。`,
+          level: 'critical',
+        });
+      }
       await handleLoginRequired(opts.businessDir);
     } else {
       exitReason = 'failed';
@@ -155,6 +169,23 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
         });
       } catch (historyErr) {
         log.error({ err: historyErr, runId }, '写 run_history 失败（不阻塞主流程）');
+      }
+    }
+
+    // 失败路径（非 login_required）发 warning 告警；login_required 已在 catch 内发 critical
+    // 关键：login_required 在 catch 已发，不再重复发；completed 也不发
+    if (exitReason === 'failed') {
+      try {
+        const notifiers = opts.injectNotifiers ?? await loadAndResolveNotifiers(opts);
+        for (const n of notifiers) {
+          await sendWithTimeout(n, {
+            title: `探星：run 失败 (${exitReason})`,
+            body: `业务 ${opts.businessDir} 在 ${new Date().toISOString()} run 失败，exit_reason=${exitReason}，错误数=${errors.length}。\n首条错误：${errors[0] ?? '(无)'}`,
+            level: 'warning',
+          });
+        }
+      } catch (notifErr) {
+        log.error({ err: notifErr }, 'finally 块 notifier 发送异常（不阻塞）');
       }
     }
   }
@@ -681,6 +712,44 @@ async function readFileFromPrompts(promptsDir: string, filename: string): Promis
 async function createCRM(profile: import('../core/types.js').BusinessProfile) {
   const { getCRM } = await import('../adapters/registry.js');
   return getCRM(profile.crm.type);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 0 PR 2（Task 2.2）：notifier 告警 helper
+// ---------------------------------------------------------------------------
+
+/**
+ * 加载业务 profile 并解析 notifier 列表。
+ * profile 加载失败时返回 []，告警降级为静默（不阻塞主流程）。
+ * 测试可通过 opts.injectNotifiers / opts.injectResolveNotifiers 覆盖。
+ */
+async function loadAndResolveNotifiers(opts: RunDailyOptions): Promise<Notifier[]> {
+  try {
+    const loaded = await loadBusinessProfile(opts.businessDir);
+    return (opts.injectResolveNotifiers ?? defaultResolveNotifiers)(loaded.profile);
+  } catch (e) {
+    log.warn({ err: e instanceof Error ? e.message : String(e) }, '加载 profile 失败，告警跳过');
+    return [];
+  }
+}
+
+/**
+ * 发送 notifier 消息，10s 超时（Promise.race），不抛异常到外层。
+ * 关键：finally 块调用时绝不能让 notifier 失败/超时 throw 到外层。
+ */
+async function sendWithTimeout(n: Notifier, message: Parameters<Notifier['send']>[0]): Promise<void> {
+  try {
+    await Promise.race([
+      n.send(message),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('notifier.send timeout')), 10_000)),
+    ]);
+  } catch (e) {
+    log.error(
+      { notifier: n.name, err: e instanceof Error ? e.message : String(e) },
+      'notifier.send 失败/超时',
+    );
+    // 绝不抛出 —— caller 可能在 finally 块，throw 会破坏 finally 语义
+  }
 }
 
 // ---------------------------------------------------------------------------
