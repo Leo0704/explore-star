@@ -83,13 +83,11 @@ $ npx vitest run tests/orchestration/run-history.test.ts \
 | `3d83db5` | Task 2.3 | status CLI 子命令（含 plan 测试 bug 修复：毫秒冲突导致 decideExitCode flake）|
 | `9a4b354` | Task 2.4 | 注册 status 到 cli/index.ts + npm script |
 | `8228867` | fix | status script 改用 cli/index.js dispatch（绕过 selfInvoke bug）|
+| `TBD` | follow-up | **修复 project-wide selfInvoke bug**：helper 签名加 `metaUrl` 参数，所有 caller 改用 `import.meta.url` 传；`status` script 回滚到直接 invoke；新增 10 个 unit test |
 
 ## 已知遗留问题（**不**在 Phase 0 scope）
 
-1. **Project-wide selfInvoke bug**：`src/cli/_shared.ts` 的 `selfInvoke` helper 检查 `import.meta.url === file://${process.argv[1]}`，但 `import.meta.url` 在 helper **内部**引用的是 helper 自己模块的 URL（`file:///.../_shared.js`），**不是**调用方的 URL（`file:///.../status.js`）。所以直接 `node dist/cli/<subcommand>.js` 永远不触发自调用。
-   - **影响范围**：所有用 `selfInvoke` 的 CLI 子命令（init / doctor / analyze / nurture / convert / insights / retry-dlq / status）通过 npm script 直接调用时都不工作
-   - **Phase 0 内的 workaround**：`status` npm script 改用 `node dist/cli/index.js status`（通过中央 switch 触发）
-   - **不在 Phase 0 scope 的根本修复**（follow-up refactor 候选）：把 `selfInvoke` 签名改成 `selfInvoke(metaUrl: string, runCLI: ...)`，让调用方传 `import.meta.url`
+1. ~~**Project-wide selfInvoke bug**~~：✅ **已在 follow-up commit 修复**。`src/cli/_shared.ts` 的 `selfInvoke` 改为 `selfInvoke(metaUrl: string, runCLI)`，11 个调用方传 `import.meta.url`。`status` npm script 回滚到 `node dist/cli/status.js`（不再需要 cli/index.js workaround）。`tests/cli/_shared.test.ts` 10 个 case 防 regression。`node dist/cli/{status,doctor,analyze,retry-dlq}.js` 全部 work。
 2. **Pre-existing 测试失败**（与 Phase 0 无关）：
    - `tests/orchestration/run-daily.test.ts` 3 个：`channels.yaml` 处于 `keyword` 模式触发 `getLLM('custom')` 缺 `CUSTOM_API_KEY` 环境变量
    - `tests/orchestration.test.ts` 1 个：同上根因

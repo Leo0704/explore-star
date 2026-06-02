@@ -112,4 +112,4 @@ export async function runCLI(args: string[]): Promise<void> {
   await runConvert(args);
 }
 
-selfInvoke(runCLI);
+selfInvoke(import.meta.url, runCLI);

@@ -23,7 +23,7 @@
     "convert": "node dist/cli/convert.js",
     "insights": "node dist/cli/insights.js",
     "retry-dlq": "node dist/cli/retry-dlq.js",
-    "status": "node dist/cli/index.js status"
+    "status": "node dist/cli/status.js"
   },
   "keywords": [
     "douyin",
