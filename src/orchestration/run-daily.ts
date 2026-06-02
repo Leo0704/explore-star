@@ -11,7 +11,8 @@ import { existsSync } from 'node:fs';
 
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getChannel, getNotifier } from '../adapters/registry.js';
-import type { Comment, Lead } from '../core/types.js';
+import type { Comment, Lead, Task } from '../core/types.js';
+import { executeTasks, loadSafetyConfig, type ExecutionResult, type SafetyConfig } from '../modules/task-executor/index.js';
 import { loadState, updateStep, markComplete, resetForNewDay } from './state.js';
 
 export interface RunDailyOptions {
@@ -31,6 +32,7 @@ export interface RunDailyResult {
   commentsCollected: number;
   leadsCreated: number;
   tasksGenerated: number;
+  tasksExecuted: number;
   duration_ms: number;
   errors: string[];
 }
@@ -187,12 +189,13 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   // 7. 引导任务生成
   await updateStep(3, 'running');
   let tasksCount = 0;
+  let tasks: Task[] = [];
   if (!opts.dryRun) {
     try {
       const { generateDailyTasks } = await import('../modules/nurture-engine/index.js');
       const crm = await createCRM(profile);
       const allLeads = await crm.listLeads({ has_open_task: true });
-      const tasks = generateDailyTasks(allLeads, { profile, conversion: conversion, dailyTaskLimit: opts.dailyTaskLimit });
+      tasks = generateDailyTasks(allLeads, { profile, conversion: conversion, dailyTaskLimit: opts.dailyTaskLimit });
       tasksCount = tasks.length;
       const tasksPath = `./data/tmp/tasks-${date}.json`;
       const { mkdir } = await import('node:fs/promises');
@@ -210,13 +213,27 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     await updateStep(3, 'completed', { skipped: true });
   }
 
+  // 7b. 任务执行（§3.6.5）—— F1 修复：把生成的 task 喂给 task-executor
+  let tasksExecuted = 0;
+  let executionResults: ExecutionResult[] = [];
+  if (!opts.dryRun) {
+    try {
+      const safety: SafetyConfig = loadSafetyConfig();
+      executionResults = await executeTasks(tasks, safety);
+      tasksExecuted = executionResults.length;
+      console.log(`[run-daily] 任务执行：${tasksExecuted}/${tasksCount} 完成`);
+    } catch (e) {
+      errors.push(`任务执行失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   // 8. 通知
   await updateStep(5, 'running');
   try {
     const notifier = getNotifier('console');
     await notifier.send({
       title: `✨ 探星早报 ${date}`,
-      body: `📊 扫描：${videosScanned} 视频 / ${comments.length} 评论 / ${leads.length} 高意向\n🎯 待执行任务：${tasksCount} 条`,
+      body: `📊 扫描：${videosScanned} 视频 / ${comments.length} 评论 / ${leads.length} 高意向\n🎯 待执行任务：${tasksCount} 条\n✅ 已执行：${tasksExecuted} 条`,
       level: 'info',
     });
     await updateStep(5, 'completed', { notified: true });
@@ -231,6 +248,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     commentsCollected: comments.length,
     leadsCreated: leads.length,
     tasksGenerated: tasksCount,
+    tasksExecuted,
     duration_ms: Date.now() - t0,
     errors,
   };
