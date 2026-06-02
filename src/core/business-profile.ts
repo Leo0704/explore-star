@@ -16,7 +16,7 @@ import yaml from 'yaml';
 import type {
   BusinessProfile, ChannelsConfig, ConversionConfig,
 } from './types.js';
-import { businessProfileSchema, formatZodError } from './config-schemas.js';
+import { businessProfileSchema, formatZodError, ChannelRateLimitsSchema } from './config-schemas.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -69,8 +69,18 @@ export async function loadBusinessProfile(businessDir: string): Promise<LoadedBu
   let channels: ChannelsConfig;
   try {
     const raw = await readFile(channelsPath, 'utf-8');
-    channels = yaml.parse(raw) ?? {};
-  } catch {
+    const parsed = yaml.parse(raw) ?? {};
+    // Phase 1 #2：channel_rate_limits 启动时 zod 校验（配错 fail-fast，**不**静默默认）
+    if (parsed.channel_rate_limits) {
+      const rlResult = ChannelRateLimitsSchema.safeParse(parsed.channel_rate_limits);
+      if (!rlResult.success) {
+        throw new Error(formatZodError(channelsPath, rlResult.error));
+      }
+      parsed.channel_rate_limits = rlResult.data;
+    }
+    channels = parsed;
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('校验失败')) throw e;
     channels = { source: { mode: 'sec_uid' } };
   }
 
