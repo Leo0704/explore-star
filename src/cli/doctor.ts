@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { loadBusinessProfile } from '../core/business-profile.js';
-import { registerBuiltins, listLLMs, listCRMs, listEmbeddings, getChannel, getCRM } from '../adapters/registry.js';
+import { registerBuiltins, listLLMs, listCRMs, listEmbeddings } from '../adapters/registry.js';
 import { checkAll, formatHealthReport, type HealthCheckResult } from '../orchestration/health-check.js';
 
 const USAGE = `

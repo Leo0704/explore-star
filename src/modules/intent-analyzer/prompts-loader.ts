@@ -54,23 +54,6 @@ export function compileIntentSystemPrompt(
 }
 
 /**
- * 预编译 intent-user prompt（注入单条评论上下文）
- */
-export function compileIntentUserPrompt(
-  template: string,
-  ctx: {
-    video_desc: string;
-    video_url: string;
-    nickname: string;
-    user_signature: string;
-    follower_count: number;
-    comment_text: string;
-  },
-): string {
-  return Handlebars.compile(template)(ctx);
-}
-
-/**
  * 预编译 hook prompt
  */
 export function compileHookPrompt(

@@ -130,19 +130,6 @@ describe('Prompt 模板', () => {
     expect(rendered).toContain('自媒体矩阵');
   });
 
-  it('compileIntentUserPrompt 注入评论上下文', async () => {
-    const { compileIntentUserPrompt } = await import('../../src/modules/intent-analyzer/prompts-loader.js');
-    const rendered = compileIntentUserPrompt('评论：{{comment_text}}\n用户：{{nickname}}', {
-      video_desc: 'AI 工具推荐',
-      video_url: 'https://douyin.com/video/123',
-      nickname: '测试用户',
-      user_signature: '普通用户',
-      follower_count: 1000,
-      comment_text: '这个工具真的好用',
-    });
-    expect(rendered).toContain('评论：这个工具真的好用');
-    expect(rendered).toContain('用户：测试用户');
-  });
 });
 
 // ---------------------------------------------------------------------------

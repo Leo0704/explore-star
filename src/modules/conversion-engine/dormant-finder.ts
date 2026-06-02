@@ -41,27 +41,3 @@ export async function findDormantLeads(
 
   return dormant;
 }
-
-/**
- * 统计沉默客户汇总
- */
-export async function dormantSummary(
-  opts: DormantFinderOptions,
-): Promise<{ count: number; oldestDays: number; byPersona: Record<string, number> }> {
-  const dormant = await findDormantLeads(opts);
-  const now = Date.now();
-
-  let oldestDays = 0;
-  const byPersona: Record<string, number> = {};
-
-  for (const lead of dormant) {
-    const last = lead.last_interaction_at
-      ? new Date(lead.last_interaction_at).getTime()
-      : lead.wechat_added_at ? new Date(lead.wechat_added_at).getTime() : now;
-    const days = Math.floor((now - last) / (1000 * 60 * 60 * 24));
-    if (days > oldestDays) oldestDays = days;
-    byPersona[lead.persona] = (byPersona[lead.persona] ?? 0) + 1;
-  }
-
-  return { count: dormant.length, oldestDays, byPersona };
-}
