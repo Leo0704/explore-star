@@ -74,6 +74,11 @@ export async function runWeeklyAnalysis(
   await mkdir(dirname(insightsPath), { recursive: true });
   await writeFile(insightsPath, JSON.stringify(insights, null, 2), 'utf-8');
 
+  // 6. 回路 1：自动写回 channels.yaml 关键词权重（学习期完成后 + auto_apply 的）
+  if (learningComplete && keywordPerf.length > 0) {
+    await applyKeywordWeights(keywordPerf, opts.channelsPath);
+  }
+
   return insights;
 }
 
@@ -134,6 +139,41 @@ async function loadEvents(path: string): Promise<LeadEvent[]> {
     return raw.split('\n').filter(Boolean).map(line => JSON.parse(line) as LeadEvent);
   } catch {
     return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 回路 1：写回 channels.yaml 关键词权重
+// ---------------------------------------------------------------------------
+
+async function applyKeywordWeights(
+  performance: KeywordPerformance[],
+  channelsPath?: string,
+): Promise<void> {
+  const path = channelsPath ?? './business/channels.yaml';
+  try {
+    const yaml = await import('yaml');
+    const raw = await readFile(path, 'utf-8');
+    const config = yaml.parse(raw);
+
+    if (!config?.search?.keywords) return;
+
+    let changed = false;
+    for (const kw of performance) {
+      if (!kw.auto_apply || kw.suggested_weight == null) continue;
+      const current = config.search.keywords[kw.keyword]?.weight;
+      if (current != null && Math.abs(current - kw.suggested_weight) > 0.01) {
+        config.search.keywords[kw.keyword].weight = kw.suggested_weight;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await writeFile(path, yaml.stringify(config), 'utf-8');
+      console.log(`[feedback-analyzer] 回路 1：已更新 channels.yaml 关键词权重`);
+    }
+  } catch {
+    // channels.yaml 不存在或不可写，静默跳过
   }
 }
 

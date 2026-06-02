@@ -8,9 +8,10 @@
  *                                  ↘ 已流失 / 沉默 / 已再激活
  */
 
-import type { Lead, LeadStatus, Task, TaskAction, BusinessProfile, ConversionConfig } from '../../core/types.js';
+import type { Lead, LeadStatus, Task, TaskAction, BusinessProfile, ConversionConfig, WeeklyInsights } from '../../core/types.js';
 import { recordStatusChange } from '../feedback-analyzer/event-recorder.js';
 import { checkAbandonment, checkOptOut } from './smart-abandon.js';
+import { buildTask } from './state-machine.js';
 
 export interface NurtureEngineOptions {
   profile: BusinessProfile;
@@ -23,6 +24,8 @@ export interface NurtureEngineOptions {
   noResponseLimit?: number;
   /** 沉默天数（默认 30） */
   dormantDays?: number;
+  /** §3.11 反馈分析器输出（用于 persona 排序 + 最佳时段） */
+  insights?: WeeklyInsights | null;
 }
 
 const STATE_ORDER: LeadStatus[] = [
@@ -46,9 +49,16 @@ export function generateDailyTasks(
   const now = Date.now();
 
   // 优先级：按 §3.11 persona value_score 降序 → 高价值 lead 优先
+  // 优先读 weekly-insights.json 的 persona_value（回路 3），fallback 到 profile 静态值
+  const personaValueMap = new Map<string, number>();
+  if (opts.insights?.persona_value) {
+    for (const pv of opts.insights.persona_value) {
+      personaValueMap.set(pv.persona, pv.value_score);
+    }
+  }
   const sortedLeads = [...leads].sort((a, b) => {
-    const va = getPersonaValue(opts.profile, a.persona);
-    const vb = getPersonaValue(opts.profile, b.persona);
+    const va = personaValueMap.get(a.persona) ?? getPersonaValue(opts.profile, a.persona);
+    const vb = personaValueMap.get(b.persona) ?? getPersonaValue(opts.profile, b.persona);
     return vb - va;
   });
 
@@ -70,9 +80,13 @@ export function generateDailyTasks(
       if (now - lastExec < minIntervalMs) continue;
     }
 
-    // 5. 根据状态生成任务
-    const task = taskForState(lead, opts);
-    if (task) tasks.push(task);
+    // 5. 根据状态生成任务（委托给 state-machine.ts 的 buildTask）
+    const task = buildTask(lead, opts.profile);
+    if (task) {
+      // 回路 4：按 persona 最佳互动时段安排推送时间
+      task.scheduled_at = pickBestTime(opts.insights, lead.persona);
+      tasks.push(task);
+    }
   }
 
   return tasks;
@@ -146,50 +160,6 @@ export function reactivate(lead: Lead): Task {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 内部：根据状态生成任务
-// ---------------------------------------------------------------------------
-
-function taskForState(lead: Lead, opts: NurtureEngineOptions): Task | null {
-  const action = nextActionForState(lead.status);
-  if (!action) return null;
-
-  // V1.4 简化：钩子已经在 lead.suggested_reply_hook / suggested_dm_hook 里
-  // §3.4 RAG 生成在「评论回复」前调用一次
-  const hook = action === 'comment_reply' ? lead.suggested_reply_hook
-             : action === 'dm' || action === 'send_material' ? lead.suggested_dm_hook
-             : '';
-
-  return {
-    task_id: crypto.randomUUID(),
-    lead_cid: lead.cid,
-    nickname: lead.nickname,
-    current_state: lead.status,
-    next_action: action,
-    hook,
-    hook_style: 'default',
-    priority: 'medium',
-    persona: lead.persona,
-    scheduled_at: new Date().toISOString(),
-    reason: `从 ${lead.status} 推进`,
-  };
-}
-
-function nextActionForState(status: LeadStatus): TaskAction | null {
-  switch (status) {
-    case '新发现': return 'like_and_follow';
-    case '已关注': return 'comment_reply';
-    case '已互动': return 'friend_request';
-    case '已加好友': return 'dm';
-    case '已私信': return 'send_material';
-    case '已加微': return null;  // 交给 §3.10 转化引擎
-    case '已预约': return null;  // 等待客户回访
-    case '沉默': return 'dm';  // 再激活
-    case '已再激活': return 'dm';
-    default: return null;
-  }
-}
-
 function markStatus(lead: Lead, to: LeadStatus, note?: string): void {
   if (lead.status === to) return;
   const from = lead.status;
@@ -209,6 +179,40 @@ function markStatus(lead: Lead, to: LeadStatus, note?: string): void {
 
 function getPersonaValue(profile: BusinessProfile, personaId: string): number {
   return profile.target_personas.find(p => p.id === personaId)?.value_score ?? 5.0;
+}
+
+/**
+ * 回路 4：根据 persona 最佳互动时段选择 scheduled_at
+ * 无 insights 或无该 persona 数据时 fallback 到明天 09:30
+ */
+function pickBestTime(insights: WeeklyInsights | null | undefined, personaId: string): string {
+  const bestTimes = insights?.best_interaction_times;
+  if (!bestTimes || bestTimes.length === 0) {
+    return nextDefaultTime();
+  }
+  const personaTime = bestTimes.find(t => t.persona === personaId);
+  if (!personaTime || personaTime.hours.length === 0) {
+    return nextDefaultTime();
+  }
+  // 取 sample 最大的时段（最可靠）
+  const best = personaTime.hours.reduce((a, b) => (b.sample > a.sample ? b : a));
+  // 找下一个匹配 weekday + hour 的时间点
+  const now = new Date();
+  for (let d = 0; d < 7; d++) {
+    const candidate = new Date(now);
+    candidate.setDate(candidate.getDate() + d);
+    if (candidate.getDay() !== best.weekday) continue;
+    candidate.setHours(best.hour, Math.floor(Math.random() * 30), 0, 0);
+    if (candidate.getTime() > now.getTime()) return candidate.toISOString();
+  }
+  return nextDefaultTime();
+}
+
+function nextDefaultTime(): string {
+  const t = new Date();
+  t.setDate(t.getDate() + 1);
+  t.setHours(9, 30, 0, 0);
+  return t.toISOString();
 }
 
 // ---------------------------------------------------------------------------

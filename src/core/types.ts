@@ -301,6 +301,9 @@ export interface Task {
   executed_at?: string;
   execution_result?: TaskResult;
   risk_signal?: string;
+  // 浏览器执行所需（§3.6.5 browserExecute 依赖）
+  video_url?: string;                   // 视频链接（like_and_follow / comment_reply 需要）
+  user_sec_uid?: string;                // 用户 sec_uid（friend_request / dm 需要）
 }
 
 // ============================================================================

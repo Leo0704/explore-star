@@ -24,6 +24,10 @@ export interface RunDailyOptions {
   injectLLM?: { complete(p: string): Promise<string> };
   /** 只跑特定步骤（0-6） */
   step?: number;
+  /** 测试注入：覆盖 executeTasks（避免需要真浏览器） */
+  injectExecuteTasks?: typeof import('../modules/task-executor/index.js').executeTasks;
+  /** 测试注入：覆盖 generateDailyTasks */
+  injectGenerateDailyTasks?: typeof import('../modules/nurture-engine/index.js').generateDailyTasks;
 }
 
 export interface RunDailyResult {
@@ -192,10 +196,14 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   let tasks: Task[] = [];
   if (!opts.dryRun) {
     try {
-      const { generateDailyTasks } = await import('../modules/nurture-engine/index.js');
+      const { generateDailyTasks } = opts.injectGenerateDailyTasks
+        ? { generateDailyTasks: opts.injectGenerateDailyTasks }
+        : await import('../modules/nurture-engine/index.js');
+      const { loadLatestInsights } = await import('../modules/nurture-engine/feedback-loader.js');
       const crm = await createCRM(profile);
       const allLeads = await crm.listLeads({ has_open_task: true });
-      tasks = generateDailyTasks(allLeads, { profile, conversion: conversion, dailyTaskLimit: opts.dailyTaskLimit });
+      const insights = await loadLatestInsights();
+      tasks = generateDailyTasks(allLeads, { profile, conversion: conversion, dailyTaskLimit: opts.dailyTaskLimit, insights });
       tasksCount = tasks.length;
       const tasksPath = `./data/tmp/tasks-${date}.json`;
       const { mkdir } = await import('node:fs/promises');
@@ -213,17 +221,43 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     await updateStep(3, 'completed', { skipped: true });
   }
 
-  // 7b. 任务执行（§3.6.5）—— F1 修复：把生成的 task 喂给 task-executor
+  // 7b. 任务执行（§3.6.5）—— 把生成的 task 喂给 task-executor
   let tasksExecuted = 0;
   let executionResults: ExecutionResult[] = [];
-  if (!opts.dryRun) {
+  if (!opts.dryRun && tasks.length > 0) {
     try {
       const safety: SafetyConfig = loadSafetyConfig();
-      executionResults = await executeTasks(tasks, safety);
+      const execCrm = await createCRM(profile);
+      const execFn = opts.injectExecuteTasks ?? executeTasks;
+      executionResults = await execFn(tasks, safety, { crm: execCrm });
       tasksExecuted = executionResults.length;
       console.log(`[run-daily] 任务执行：${tasksExecuted}/${tasksCount} 完成`);
     } catch (e) {
       errors.push(`任务执行失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // 7c. 转化引擎（§3.10）—— 加微后物料推送 + 转化日报
+  if (!opts.dryRun) {
+    try {
+      const convCrm = await createCRM(profile);
+      const { handleWechatAdded, generateDailyReport, pushDailyReport } = await import('../modules/conversion-engine/index.js');
+      const convOpts = { profile, conversion, crm: convCrm };
+
+      // 扫描「已加微」lead，推送物料
+      const wechatLeads = await convCrm.listLeads({ status: ['已加微'] });
+      for (const lead of wechatLeads) {
+        try {
+          await handleWechatAdded(lead, convOpts);
+        } catch { /* 单 lead 失败不阻塞 */ }
+      }
+
+      // 生成并推送转化日报
+      const report = await generateDailyReport(date, convOpts);
+      await pushDailyReport(report);
+      console.log(`[run-daily] 转化日报：新发现=${report.new_leads} 加微=${report.new_wechat_added} 预约=${report.new_bookings} 成交=${report.new_deals_closed}`);
+    } catch (e) {
+      errors.push(`转化引擎失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

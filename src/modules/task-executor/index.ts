@@ -240,9 +240,8 @@ async function executeBrowserActionWithBrowser(
 ): Promise<ExecutionResult> {
   // 单测 helper：直接复用 browser-actions 的真逻辑，但注入 fake browser
   const { likeAndFollow, commentReply, friendRequest, sendDirectMessage } = await import('./browser-actions.js');
-  const customFields = (task as any).custom_fields ?? {};
-  const videoUrl = customFields.video_url as string | undefined;
-  const userSecUid = customFields.user_sec_uid as string | undefined;
+  const videoUrl = task.video_url;
+  const userSecUid = task.user_sec_uid;
   const baseResult: ExecutionResult = {
     task_id: task.task_id,
     lead_cid: task.lead_cid,
