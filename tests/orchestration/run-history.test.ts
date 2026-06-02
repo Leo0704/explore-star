@@ -15,8 +15,8 @@ import {
   appendRunHistory,
   readRunHistory,
   summaryStats,
-  type RunHistoryEntry,
 } from '../../src/orchestration/run-history.js';
+import { makeEntry } from '../_helpers/run-history-fixture.js';
 
 let tmpDir: string;
 let historyPath: string;
@@ -29,23 +29,6 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
-
-function makeEntry(overrides: Partial<RunHistoryEntry> = {}): RunHistoryEntry {
-  return {
-    run_id: crypto.randomUUID(),
-    business: '/test/business',
-    mode: 'full',
-    dry_run: false,
-    started_at: new Date().toISOString(),
-    finished_at: new Date().toISOString(),
-    duration_ms: 1000,
-    exit_reason: 'completed',
-    step_durations: {},
-    phase_counts: { videos_scanned: 0, comments_collected: 0, leads_created: 0, tasks_generated: 0, tasks_executed: 0 },
-    errors: [],
-    ...overrides,
-  };
-}
 
 describe('appendRunHistory', () => {
   it('appends an entry to a new file', async () => {
