@@ -3,7 +3,7 @@
  *
  * 登录态浏览器 + 限速 + 风控信号 + 紧急停止 + 钩子审核
  *
- * V1 实现：mock 浏览器（不真调），留接口便于后续升级
+ * V1 实现：通过 BrowserBridge 连接登录态浏览器执行真实操作
  */
 
 import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'node:fs';
