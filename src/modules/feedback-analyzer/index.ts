@@ -160,18 +160,46 @@ async function applyKeywordWeights(
 
     const wMin = config.search.weight_min ?? 0.2;
     const wMax = config.search.weight_max ?? 3.0;
+    const cooldownWeeks = config.search.weight_cooldown_weeks ?? 3;
 
+    // weight_meta 记录每个关键词的调整历史（写在 channels.yaml 里）
+    if (!config.search.weight_meta) config.search.weight_meta = {};
+    const meta = config.search.weight_meta as Record<string, {
+      last_adjusted_week?: string;
+      consecutive_direction?: number; // 正=上调，负=下调
+    }>;
+
+    const currentWeek = getWeekStart();
     let changed = false;
+
     for (const kw of performance) {
       if (!kw.auto_apply || kw.suggested_weight == null) continue;
       const current = config.search.keywords[kw.keyword]?.weight;
       if (current == null) continue;
-      // clamp 到 [weight_min, weight_max] 防震荡
+
       const clamped = Math.max(wMin, Math.min(wMax, kw.suggested_weight));
-      if (Math.abs(current - clamped) > 0.01) {
-        config.search.keywords[kw.keyword].weight = Math.round(clamped * 100) / 100;
-        changed = true;
+      if (Math.abs(current - clamped) < 0.01) continue;
+
+      // 冷却期检查：连续 N 周同方向调整后暂停 1 周
+      const direction = clamped > current ? 1 : -1;
+      const kwMeta = meta[kw.keyword] ?? {};
+      const lastDir = kwMeta.consecutive_direction ?? 0;
+      const sameDirection = (lastDir > 0 && direction > 0) || (lastDir < 0 && direction < 0);
+      const consecutiveWeeks = sameDirection ? Math.abs(lastDir) : 0;
+
+      if (consecutiveWeeks >= cooldownWeeks) {
+        // 冷却中：跳过本周，重置计数
+        meta[kw.keyword] = { last_adjusted_week: currentWeek, consecutive_direction: 0 };
+        continue;
       }
+
+      // 应用调整
+      config.search.keywords[kw.keyword].weight = Math.round(clamped * 100) / 100;
+      meta[kw.keyword] = {
+        last_adjusted_week: currentWeek,
+        consecutive_direction: sameDirection ? consecutiveWeeks + 1 : direction,
+      };
+      changed = true;
     }
 
     if (changed) {

@@ -134,6 +134,19 @@ export async function handleWechatAdded(
   // 更新 lead 状态
   await opts.crm.updateStatus(lead.cid, '已预约', '已推送加微后物料');
 
+  // Loop 5: 记录触达事件（供反馈分析器归因）
+  void recordEvent({
+    event: 'touchpoint_sent',
+    cid: lead.cid,
+    keyword: 'send_material',
+    hook_style: 'wechat',
+    hook_text: opts.conversion.post_add_asset!.name,
+    persona: lead.persona,
+    interaction_time: new Date().toISOString(),
+    touchpoint_type: 'send_material',
+    touchpoint_channel: 'wechat',
+  }).catch(() => {});
+
   return { pushed: true };
 }
 

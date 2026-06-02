@@ -40,6 +40,7 @@ export async function recordStatusChange(
     persona: string;
     interaction_time: string;
     days_to_convert?: number;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
   const event: LeadEvent = {

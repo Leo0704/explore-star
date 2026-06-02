@@ -160,20 +160,24 @@ export function reactivate(lead: Lead): Task {
   };
 }
 
-function markStatus(lead: Lead, to: LeadStatus, note?: string): void {
+function markStatus(lead: Lead, to: LeadStatus, note?: string, overrides?: { hook_text?: string; revenue?: number }): void {
   if (lead.status === to) return;
   const from = lead.status;
   lead.status = to;
   lead.status_history.push({ from, to, at: new Date().toISOString(), note });
   lead.updated_at = new Date().toISOString();
-  // F3: 接入事件记录器（不阻塞状态机，错误吞掉避免影响主流程）
-  const metadata = {
+  // 接入事件记录器（不阻塞状态机，错误吞掉避免影响主流程）
+  const metadata: Parameters<typeof recordStatusChange>[3] = {
     keyword: lead.keyword ?? '',
     hook_style: lead.hook_style ?? 'default',
-    hook_text: lead.suggested_dm_hook ?? lead.suggested_reply_hook ?? '',
+    hook_text: overrides?.hook_text ?? lead.suggested_dm_hook ?? lead.suggested_reply_hook ?? '',
     persona: lead.persona,
     interaction_time: lead.last_interaction_at ?? new Date().toISOString(),
   };
+  // Loop 3: 已成交时把营收写入 metadata
+  if (to === '已成交' && (overrides?.revenue ?? lead.revenue)) {
+    metadata.metadata = { revenue: overrides?.revenue ?? lead.revenue };
+  }
   void recordStatusChange(lead.cid, from, to, metadata).catch(() => {});
 }
 
