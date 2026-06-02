@@ -76,8 +76,10 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
 
     async recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string }): Promise<void> {
       await recordEvent({
-        event: 'lead_status_changed',
+        event: 'touchpoint_sent',
         cid,
+        touchpoint_type: _touchpoint.action_type,
+        touchpoint_channel: _touchpoint.channel,
         keyword: _touchpoint.action_type,
         hook_style: _touchpoint.channel,
         hook_text: _touchpoint.content_summary,
