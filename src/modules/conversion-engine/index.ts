@@ -96,7 +96,7 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
 
 export { pushMaterial, generateConversionReport, pushConversionReport } from './material-pusher.js';
 export { watchBookings, syncBookingsOnce } from './booking-listener.js';
-export { findDormantLeads, dormantSummary } from './dormant-finder.js';
+export { findDormantLeads } from './dormant-finder.js';
 export { reactivateLead as reactivateLead, reactivateDormantPool } from './reactivate.js';
 
 // ---------------------------------------------------------------------------

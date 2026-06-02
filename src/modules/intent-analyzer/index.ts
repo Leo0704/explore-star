@@ -11,7 +11,7 @@
 
 import type { Comment, Lead, BusinessProfile } from '../../core/types.js';
 import { getLLM } from '../../adapters/registry.js';
-import { loadPromptTemplates, compileIntentSystemPrompt, compileIntentUserPrompt } from './prompts-loader.js';
+import { loadPromptTemplates, compileIntentSystemPrompt } from './prompts-loader.js';
 import { filterMarketingComments } from './marketing-filter.js';
 import { analyzeBatch, type BatchContext } from './batch.js';
 
@@ -124,6 +124,6 @@ export async function analyzeComments(
 }
 
 // re-export 工具（方便编排器直接用）
-export { loadPromptTemplates, compileIntentSystemPrompt, compileIntentUserPrompt };
+export { loadPromptTemplates, compileIntentSystemPrompt };
 export { filterMarketingComments, isMarketingAccount } from './marketing-filter.js';
 export { analyzeBatch } from './batch.js';

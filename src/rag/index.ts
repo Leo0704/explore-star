@@ -9,7 +9,7 @@
 export { buildKnowledgeIndex, type IndexResult } from './index-builder.js';
 
 // 检索
-export { retrieveTopK, cacheDocs, retrieveFromCache, clearCache, type RetrievedDoc } from './retriever.js';
+export { retrieveTopK, type RetrievedDoc } from './retriever.js';
 
 // 钩子生成
 export { generateHook, type HookGeneratorOptions, type GenerateHookResult } from './hook-generator.js';

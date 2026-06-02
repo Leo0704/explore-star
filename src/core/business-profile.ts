@@ -130,31 +130,3 @@ function validateProfile(p: BusinessProfile): void {
     throw new Error('intent_signals 至少要 1 个信号词（供意图分析 prompt）');
   }
 }
-
-/**
- * 列出指定业务目录下的所有知识库 markdown 文件
- */
-export async function listKnowledgeFiles(knowledgeDir: string): Promise<string[]> {
-  try {
-    const entries = await readdir(knowledgeDir, { recursive: true });
-    return entries
-      .filter((f): f is string => typeof f === 'string' && f.endsWith('.md'))
-      .map(f => join(knowledgeDir, f));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * 列出指定业务目录下的所有 prompt 模板文件
- */
-export async function listPromptTemplates(promptsDir: string): Promise<string[]> {
-  try {
-    const entries = await readdir(promptsDir, { recursive: true });
-    return entries
-      .filter((f): f is string => typeof f === 'string' && f.endsWith('.md'))
-      .map(f => join(promptsDir, f));
-  } catch {
-    return [];
-  }
-}

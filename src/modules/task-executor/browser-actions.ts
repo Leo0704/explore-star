@@ -14,8 +14,25 @@
  */
 
 import type { Task } from '../../core/types.js';
-import type { ExecutionResult } from './index.js';
-import { createRiskSignal } from './safety.js';
+import type { ExecutionResult, RiskSignal } from './index.js';
+
+// ---------------------------------------------------------------------------
+// 风控信号工具
+// ---------------------------------------------------------------------------
+
+const SIGNAL_ACTIONS: Record<string, RiskSignal['action']> = {
+  captcha_triggered_3_times_in_1h: 'stop_today',
+  private_msg_rejected_2_times: 'emergency_stop',
+  ip_changed_5_times: 'emergency_stop',
+  account_ban: 'emergency_stop',
+  slider: 'pause_1h',
+  rate_limit: 'pause_1h',
+  ip_switch: 'stop_today',
+};
+
+function createRiskSignal(type: RiskSignal['type']): RiskSignal {
+  return { type, count: 1, action: SIGNAL_ACTIONS[type] ?? 'pause_1h' };
+}
 
 // ---------------------------------------------------------------------------
 // puppeteer-core 动态加载（允许在测试环境无 puppeteer 时降级）
@@ -86,14 +103,6 @@ export async function launchBrowser(config: BrowserConfig): Promise<import('pupp
   } catch (e) {
     console.error(`[browser-actions] 启动浏览器失败：${e instanceof Error ? e.message : String(e)}`);
     return null;
-  }
-}
-
-export async function closeBrowser(): Promise<void> {
-  if (_browser) {
-    await _browser.close().catch(() => {});
-    _browser = null;
-    _browserUserDataDir = null;
   }
 }
 
@@ -304,8 +313,6 @@ export async function sendDirectMessage(
 // 主入口：执行浏览器动作（V1.4 真实 puppeteer）
 // ---------------------------------------------------------------------------
 
-export type BrowserActionType = 'like_and_follow' | 'comment_reply' | 'friend_request' | 'dm' | 'send_material';
-
 /**
  * 执行单个任务的浏览器动作
  *
@@ -393,17 +400,3 @@ export async function executeBrowserAction(
   return baseResult;
 }
 
-/**
- * 解析视频 URL 获取 aweme_id
- */
-export function extractAwemeId(videoUrl: string): string {
-  const match = videoUrl.match(/\/video\/(\d+)/);
-  return match ? match[1] : '';
-}
-
-/**
- * 构造用户主页 URL
- */
-export function buildUserProfileUrl(userSecUid: string): string {
-  return `https://www.douyin.com/user/${userSecUid}`;
-}

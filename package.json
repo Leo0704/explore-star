@@ -16,7 +16,6 @@
     "run": "node dist/orchestration/run-daily.js",
     "init": "node dist/cli/init.js",
     "doctor": "node dist/cli/doctor.js",
-    "search": "node dist/cli/search.js",
     "analyze": "node dist/cli/analyze.js",
     "nurture": "node dist/cli/nurture.js",
     "convert": "node dist/cli/convert.js",

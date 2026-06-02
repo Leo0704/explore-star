@@ -10,6 +10,7 @@ import { dirname } from 'node:path';
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getCRM } from '../adapters/registry.js';
 import { generateDailyTasks } from '../modules/nurture-engine/index.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -29,10 +30,7 @@ export async function runNurture(args: string[]): Promise<void> {
   const limit = parseInt(extractFlag(args, '--limit') || '20');
   const dryRun = args.includes('--dry-run');
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
+  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 
@@ -61,15 +59,8 @@ export async function runNurture(args: string[]): Promise<void> {
   }
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runNurture(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

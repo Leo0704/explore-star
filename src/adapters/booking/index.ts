@@ -9,7 +9,6 @@
 
 import { registerBookingProvider, listBookingProviders } from '../registry.js';
 import { FeishuCalendarBooking } from './feishu-calendar.js';
-import { WebhookBooking } from './webhook.js';
 
 export function registerAll(): void {
   // 飞书日历
@@ -18,12 +17,8 @@ export function registerAll(): void {
     registerBookingProvider('feishu_calendar', provider);
   }
 
-  // 通用 WebHook
-  registerBookingProvider('webhook', new WebhookBooking());
-
   console.log(`[adapters/booking] 已注册：${listBookingProviders().join(', ')}`);
 }
 
 export { FeishuCalendarBooking } from './feishu-calendar.js';
-export { WebhookBooking } from './webhook.js';
 export type { BookingEvent, BookingProvider } from './base.js';

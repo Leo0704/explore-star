@@ -130,18 +130,6 @@ describe('Orchestration', () => {
       }
     });
 
-    it('getResumePoint 应指向第一个未完成的 step', async () => {
-      const { getResumePoint, updateStep, resetForNewDay } = await import('../src/orchestration/state.js');
-
-      await resetForNewDay();
-      await updateStep(0, 'completed');
-      const resumePoint = await getResumePoint();
-
-      expect(resumePoint).not.toBeNull();
-      expect(resumePoint?.step).toBe(1);
-      expect(resumePoint?.stepName).toBe('analysis');
-    });
-
     it('persist state atomically via tmp+rename', async () => {
       const { saveState, loadState, resetForNewDay } = await import('../src/orchestration/state.js');
       const { rm, writeFile } = await import('node:fs/promises');

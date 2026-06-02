@@ -38,5 +38,3 @@ export function registerAll(): void {
 
   console.log(`[adapters/llm] 已注册：${listLLMs().join(', ') || '（无 — 请设置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY）'}`);
 }
-
-export { OpenAICompatibleLLM } from './openai-compatible.js';

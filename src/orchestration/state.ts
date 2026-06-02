@@ -124,22 +124,6 @@ export async function markComplete(completed: boolean): Promise<PipelineState> {
 }
 
 /**
- * 获取恢复点（用于 resume）
- */
-export async function getResumePoint(): Promise<{ step: number; stepName: string } | null> {
-  const state = await loadState();
-  if (state.completed) return null;
-
-  // 找到第一个未完成的步骤
-  for (let i = 0; i < state.steps.length; i++) {
-    if (state.steps[i].status !== 'completed') {
-      return { step: i, stepName: state.steps[i].name };
-    }
-  }
-  return null;
-}
-
-/**
  * 重置状态（新的一天）
  */
 export async function resetForNewDay(): Promise<PipelineState> {

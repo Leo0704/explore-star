@@ -68,37 +68,3 @@ export async function retrieveTopK(
   }
 }
 
-/**
- * 从内存缓存中检索（buildIndex 之后用）
- * V1 实现：内存扫描，无持久化检索路径
- */
-const cachedDocs: Map<string, Array<{ path: string; content: string; embedding: number[] }>> = new Map();
-
-export function cacheDocs(knowledgeDir: string, docs: Array<{ path: string; content: string; embedding: number[] }>): void {
-  cachedDocs.set(knowledgeDir, docs);
-}
-
-export async function retrieveFromCache(
-  query: string,
-  k: number,
-  knowledgeDir: string,
-  embeddingProvider: EmbeddingProvider,
-): Promise<RetrievedDoc[]> {
-  const docs = cachedDocs.get(knowledgeDir);
-  if (!docs || docs.length === 0) return [];
-
-  const queryEmbedding = await embeddingProvider.embed(query);
-
-  return docs
-    .map(d => ({ path: d.path, content: d.content, score: cosineSimilarity(queryEmbedding, d.embedding) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
-}
-
-export function clearCache(knowledgeDir?: string): void {
-  if (knowledgeDir) {
-    cachedDocs.delete(knowledgeDir);
-  } else {
-    cachedDocs.clear();
-  }
-}

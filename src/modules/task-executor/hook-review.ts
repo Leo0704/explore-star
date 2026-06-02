@@ -238,9 +238,3 @@ export async function reviewHook(
   return { approved: false, reason: '审核超时' };
 }
 
-/**
- * 检查任务是否需要审核
- */
-export function needsReview(task: Task, config: HookReviewConfig): boolean {
-  return config.enabled === true;
-}

@@ -1,65 +1,91 @@
 # CLAUDE.md
 
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+减少常见 LLM 编码错误的行为准则。与项目特定指令合并使用。
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+**取舍：** 这些准则偏向谨慎而非速度。简单任务自行判断。
 
-## 1. Think Before Coding
+## 1. 先想再写
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+**不要假设。不要隐藏困惑。摆出取舍。**
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+动手前：
+- 明确说出你的假设。不确定就问。
+- 如果有多种解读，列出来——不要默默选一个。
+- 如果有更简单的方案，说出来。该推回就推回。
+- 如果某件事不清楚，停下来。指出哪里不清楚，问。
 
-## 2. Simplicity First
+## 2. 简单优先
 
-**Minimum code that solves the problem. Nothing speculative.**
+**最少代码解决问题。不做多余的事。**
 
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
+- 不做没被要求的功能。
+- 不为只用一次的代码搞抽象。
+- 不为"灵活性"或"可配置性"加没被要求的东西。
+- 不为不可能的场景写错误处理。
+- 如果 200 行能缩到 50 行，重写。
 
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+问自己："资深工程师会觉得这过度设计了吗？" 如果是，简化。
 
-## 3. Surgical Changes
+## 3. 精准改动
 
-**Touch only what you must. Clean up only your own mess.**
+**只动必须动的。只清理自己制造的垃圾。**
 
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
+编辑已有代码时：
+- 不要"顺手改进"旁边的代码、注释、格式。
+- 不要重构没坏的东西。
+- 匹配已有风格，即使你会写得不同。
+- 如果发现无关的死代码，提一嘴——不要删。
 
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
+你的改动产生孤立代码时：
+- 删掉你的改动导致的未使用 import/变量/函数。
+- 不要删已有的死代码，除非被要求。
 
-The test: Every changed line should trace directly to the user's request.
+检验标准：每一行改动都能追溯到用户的请求。
 
-## 4. Goal-Driven Execution
+## 4. 目标驱动
 
-**Define success criteria. Loop until verified.**
+**定义成功标准。循环直到验证通过。**
 
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
+把任务变成可验证的目标：
+- "加校验" → "写无效输入的测试，然后让它们通过"
+- "修 bug" → "写一个复现 bug 的测试，然后让它通过"
+- "重构 X" → "确保重构前后测试都通过"
 
-For multi-step tasks, state a brief plan:
+多步任务，列出简要计划：
 ```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
+1. [步骤] → 验证：[检查项]
+2. [步骤] → 验证：[检查项]
+3. [步骤] → 验证：[检查项]
 ```
 
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+强成功标准让你能独立循环。弱标准（"让它能跑"）需要反复确认。
 
 ---
 
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+**这些准则有效的标志：** diff 里不必要的改动更少，因过度设计导致的重写更少，澄清问题在实现前而不是犯错后提出。
+
+## 5. CodeGraph（必须使用）
+
+项目已配置 CodeGraph（`.codegraph/`），提供 `codegraph_search`/`codegraph_callers`/`codegraph_trace`/`codegraph_impact` 等 MCP 工具。
+
+**以下场景必须先调 CodeGraph，禁止手动 grep/read 遍历：**
+
+| 场景 | 工具 | 说明 |
+|---|---|---|
+| **找函数/类/接口在哪** | `codegraph_search` | 搜名字，秒出文件+行号+签名 |
+| **查谁调用了 X** | `codegraph_callers` | 改函数前必须查，确认影响范围 |
+| **查 X 调用了谁** | `codegraph_callees` | 理解函数内部依赖 |
+| **追踪调用链 A→B** | `codegraph_trace` | 跨模块数据流追踪，如 `runDaily → executeTasks` |
+| **改接口前查影响** | `codegraph_impact` | 改 `Lead`/`Task` 等核心类型前必须查 |
+| **快速理解模块结构** | `codegraph_explore` | 按文件/符号批量读取上下文 |
+| **重构前定位相关文件** | `codegraph_files` | 比 glob 更快，含符号统计 |
+
+**不需要 CodeGraph 的场景：**
+- 逐行审查业务逻辑是否闭环（需要人读代码）
+- 修改单个文件内的局部代码
+- 写测试、写配置
+
+## 6. 回复规范
+
+**每次回复必须以「老板，」开头**，用于验证 agent 是否遵循了本文件的规则。
+
