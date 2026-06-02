@@ -17,9 +17,13 @@
 
 import type {
   LLMProvider, CRMAdapter, ChannelAdapter, Notifier, EmbeddingProvider,
+  ChannelQpsLimit, ChannelDailyQuota,
 } from '../core/types.js';
 import type { BookingProvider } from './booking/base.js';
 import { logger } from '../core/logger.js';
+import { readFile } from 'node:fs/promises';
+import { parse as parseYaml } from 'yaml';
+import { resolve as resolvePath } from 'node:path';
 
 const log = logger.child({ module: 'adapters/registry' });
 
@@ -210,4 +214,122 @@ export async function healthCheckAll(): Promise<Record<string, { ok: boolean; de
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 #5：channel 配置 hook（占位实现，1.x 之后用）
+// ---------------------------------------------------------------------------
+
+/** channels.yaml 的 `channels` 节点形状（仅我们关心的字段） */
+interface ChannelsYamlConfig {
+  channels?: Record<string, ChannelQpsLimit & {
+    daily_quota?: ChannelDailyQuota;
+  }>;
+}
+
+/**
+ * 加载 channels.yaml 里的 `channels.<name>` 节点。
+ *
+ * 路径优先级（不抛错，找不到就返回 {}）：
+ *   1. `process.env.EXPLORE_STAR_CHANNELS_PATH`（测试用）
+ *   2. `./channels.yaml`（业务运行时默认）
+ *
+ * 加载失败（文件不存在 / 解析失败）→ 静默返回 {}，不阻塞业务。
+ */
+async function loadChannelConfigs(): Promise<ChannelsYamlConfig> {
+  const yamlPath = process.env.EXPLORE_STAR_CHANNELS_PATH ?? resolvePath('./channels.yaml');
+  try {
+    const raw = await readFile(yamlPath, 'utf-8');
+    const parsed = parseYaml(raw) as ChannelsYamlConfig | null | undefined;
+    return parsed?.channels ? { channels: parsed.channels } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 进程级缓存（避免每个调用都读盘） */
+let _channelConfigCache: ChannelsYamlConfig | null = null;
+let _channelConfigCachePromise: Promise<ChannelsYamlConfig> | null = null;
+
+async function getChannelConfigsAsync(): Promise<ChannelsYamlConfig> {
+  if (_channelConfigCache) return _channelConfigCache;
+  if (!_channelConfigCachePromise) {
+    _channelConfigCachePromise = loadChannelConfigs().then((c) => {
+      _channelConfigCache = c;
+      return c;
+    });
+  }
+  return _channelConfigCachePromise;
+}
+
+/** 测试用：清缓存（让 EXPLORE_STAR_CHANNELS_PATH 变更后立即生效） */
+export function _resetChannelConfigCache(): void {
+  _channelConfigCache = null;
+  _channelConfigCachePromise = null;
+}
+
+/**
+ * 同步读取 channel 声明的 QPS 上限。
+ * 启动时需先调 `initChannelConfigs()` 让缓存命中；
+ * 未初始化时自动 fallback 到 `ChannelAdapter.rateLimits` 推导，再不济返回 1。
+ *
+ * 给 #2 rate-limiter 用。
+ */
+export function getChannelQps(name: string): number {
+  // 1. yaml 显式声明
+  const declared = _channelConfigCache?.channels?.[name]?.qps;
+  if (typeof declared === 'number' && declared > 0) return declared;
+  // 2. 兜底：从 rateLimits 推导（最严动作的小时上限 / 3600）
+  const ch = channelRegistry.get(name);
+  if (ch) {
+    const rl = ch.rateLimits;
+    const perHour = Math.min(
+      rl.search_per_hour || Infinity,
+      rl.user_videos_per_hour || Infinity,
+      rl.comment_per_hour || Infinity,
+    );
+    if (Number.isFinite(perHour) && perHour > 0) {
+      return Math.max(0.001, perHour / 3600);
+    }
+  }
+  return 1;
+}
+
+/**
+ * 同步读取 channel 声明的每日配额。
+ * 给 #2 rate-limiter + status 命令用。
+ *
+ * 返回 null 表示无限制。
+ */
+export function getChannelDailyQuota(name: string): ChannelDailyQuota | null {
+  const quota = _channelConfigCache?.channels?.[name]?.daily_quota;
+  if (!quota) return null;
+  return quota;
+}
+
+/**
+ * 账号轮换 hook（**占位**）。1.x 之后实现真账号轮换。
+ * 当前实现：直接返回 'default'。
+ *
+ * 不在 v1.x 实施：roadmap §2.5 显式禁单。
+ */
+export function rotateAccount(_name: string): string {
+  log.warn({ channel: _name }, 'rotateAccount() 是 v1.x 占位，返回 default');
+  return 'default';
+}
+
+/**
+ * 初始化 channel 配置缓存（启动时调用一次，让 getChannelQps / getChannelDailyQuota 同步可用）。
+ * 失败静默——hook 不阻塞业务。
+ */
+export async function initChannelConfigs(yamlPath?: string): Promise<void> {
+  if (yamlPath) process.env.EXPLORE_STAR_CHANNELS_PATH = yamlPath;
+  const cfg = await loadChannelConfigs();
+  _channelConfigCache = cfg;
+  _channelConfigCachePromise = Promise.resolve(cfg);
+}
+
+/** 内部：异步等价的 getChannelQps（用于 #2 rate-limiter 启动时拿数据） */
+export async function ensureChannelConfigsLoaded(): Promise<void> {
+  await getChannelConfigsAsync();
 }

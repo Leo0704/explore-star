@@ -23,6 +23,7 @@ import { loadState, updateStep, markComplete, resetForNewDay } from './state.js'
 import { logger } from '../core/logger.js';
 import { appendRunHistory, type RunHistoryEntry } from './run-history.js';
 import { resolveNotifiers as defaultResolveNotifiers } from '../core/notifier-resolver.js';
+import { CostTracker } from '../adapters/llm/_cost-tracker.js';
 
 const log = logger.child({ module: 'run-daily' });
 
@@ -70,14 +71,12 @@ export interface RunDailyResult {
 
 /**
  * R1：登录态失效信号。抛出后由 runDaily 外层捕获，触发飞书告警 + 立刻停手。
+ *
+ * 类定义已迁出到 `core/channel-errors.ts`（Phase 3 #5 多渠道架构准备）。
+ * 保留 re-export 以兼容历史 import 路径 `from '../orchestration/run-daily.js'`。
  */
-export class LoginRequiredError extends Error {
-  readonly code = 'LOGIN_REQUIRED' as const;
-  constructor(message = '检测到登录态失效') {
-    super(message);
-    this.name = 'LoginRequiredError';
-  }
-}
+import { LoginRequiredError } from '../core/channel-errors.js';
+export { LoginRequiredError };
 
 /** R1：调用 channel.ping() 探测登录态，未登录则抛 LoginRequiredError */
 async function assertLoggedIn(channel: import('../core/types.js').ChannelAdapter): Promise<void> {
@@ -154,6 +153,16 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   } finally {
     if (writeHistory) {
       try {
+        // Phase 2 #4:cost_estimate 字段(复用 Phase 0 schema,run-history.ts:38-42)
+        // runDailyBody 把 snapshot 挂到 opts.costSnapshot;skipLLM 路径下保持全 0
+        const costSnapshot = (opts as { costSnapshot?: { prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number } }).costSnapshot;
+        const cost_estimate = costSnapshot
+          ? {
+              prompt_tokens: costSnapshot.prompt_tokens,
+              completion_tokens: costSnapshot.completion_tokens,
+              estimated_cost_usd: costSnapshot.estimated_cost_usd,
+            }
+          : { prompt_tokens: 0, completion_tokens: 0, estimated_cost_usd: 0 };
         await appendRunHistory(historyPath, {
           run_id: runId,
           business: opts.businessDir,
@@ -166,6 +175,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
           step_durations: stepDurations,
           phase_counts: phaseCounts,
           errors,
+          cost_estimate,
         });
       } catch (historyErr) {
         log.error({ err: historyErr, runId }, '写 run_history 失败（不阻塞主流程）');
@@ -295,6 +305,10 @@ async function runDailyBody(
       const userTpl = await readFileFromPrompts(loaded.promptsDir, 'intent-user.md');
       const llm = opts.injectLLM ?? (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
 
+      // Phase 2 #4:cost 埋点 —— 用 CostTracker 包装 LLM,累加 token/cost
+      // cache 命中时 fetcher 不被调 → costTracker 自动不算 token（见 batch.ts: fetcher 闭包）
+      const costTracker = new CostTracker(llm as Parameters<typeof CostTracker>[0], profile.llm.provider);
+
       // §3.11 回路 2：注入当前最优钩子风格（写到 lead.hook_style）
       // 优先级：weekly-insights.json（≥3 次测试的最优风格） > profile.hook_config.style > '像朋友推荐，不像销售'
       const bestStyle = await selectBestHookStyle();
@@ -307,14 +321,21 @@ async function runDailyBody(
         llm,
         threshold: 0.7,
         hookStyle,
+        costTracker,
+        modelName: profile.llm.model,
       };
       const batchSize = 10;
       for (let i = 0; i < filtered.length; i += batchSize) {
         const batch = filtered.slice(i, i + batchSize);
+        // Phase 2 #4:记录每批实际大小(供未来 P50/P95 统计)
+        costTracker.recordBatchSize(batch.length);
         const result = await analyzeBatch(batch, batchCtx);
         leads.push(...result.leads);
         result.rejected.forEach(r => errors.push(`[reject] ${r.cid}: ${r.reason}`));
       }
+      // Phase 2 #4:把累积的 cost snapshot 挂到 opts,让 runDaily 外层 finally 块读
+      // 不破坏 try/catch/finally 主结构,只新增一个属性
+      (opts as { costSnapshot?: ReturnType<typeof costTracker.snapshot> }).costSnapshot = costTracker.snapshot();
       stepDurations['analysis'] = Date.now() - stepStart_analysis;
     } catch (e) {
       errors.push(`LLM 分析失败：${e instanceof Error ? e.message : String(e)}`);

@@ -125,6 +125,20 @@ export interface ChannelsConfig {
     exclude_punctuation_only?: boolean; // 默认 true
     exclude_marketing?: boolean;    // 默认 true（由 LLM 判断）
   };
+  /**
+   * Phase 1 #2: 渠道速率限制（QPS + daily quota）。
+   * 0 = 停服（fail-loud 触发 notifier critical）。
+   * 不存在时：调度器使用 ChannelAdapter.rateLimits 默认值。
+   */
+  channel_rate_limits?: {
+    douyin?: {
+      search_qps: number;
+      user_videos_qps: number;
+      comment_qps: number;
+      friend_request_per_day: number;
+      dm_per_day: number;
+    };
+  };
 }
 
 // ============================================================================
@@ -522,6 +536,43 @@ export interface RateLimits {
   comment_per_hour: number;
   friend_request_per_day: number;
   dm_per_day: number;
+}
+
+// ============================================================================
+// Phase 3 #5 多渠道架构准备（roadmap §2.5）—— channel 速率策略 schema
+// ============================================================================
+
+/**
+ * Channel 自我声明的 QPS 上限（**业务方策略**，写在 channels.yaml 的 `channels.<name>.qps` 节点）。
+ *
+ * 与 `RateLimits` 的区别：
+ *   - `RateLimits`：平台硬上限（puppeteer / API 客观限制，写死在 channel adapter 里）
+ *   - `QpsLimit`：探星系统对自身的限速（业务方可调，写在 yaml 里）
+ *
+ * 给 #2 rate-limiter 调度器消费。
+ */
+export interface ChannelQpsLimit {
+  /** 单一动作的最大 QPS（如 1 = 1 req/sec） */
+  qps?: number;
+  /** 突发容量（默认 = qps） */
+  burst?: number;
+}
+
+/**
+ * Channel 自我声明的每日配额。
+ *
+ * `null` = 平台不限。
+ * `by_action` 可覆盖 `total`（更细粒度）。
+ */
+export interface ChannelDailyQuota {
+  /** 平台每天允许的总动作数；null = 平台不限 */
+  total?: number | null;
+  /** 动作级配额（可选，覆盖 total） */
+  by_action?: Partial<{
+    search: number;
+    user_videos: number;
+    comments: number;
+  }>;
 }
 
 export interface ChannelAdapter {
