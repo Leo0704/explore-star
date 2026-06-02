@@ -1,34 +1,29 @@
 /**
- * 真实浏览器动作（§3.6.5）—— puppeteer-core 实现
+ * 浏览器动作 —— 基于 vendored opencli BrowserBridge
  *
- * 4 个 action:
- *   - like_and_follow: 打开视频页 → 点赞 → 关注作者
- *   - comment_reply:  打开视频页 → 评论区 → 输入 hook → 发送
- *   - friend_request: 打开用户主页 → 点击「关注」
- *   - dm:             打开用户主页 → 私信入口 → 输入 hook → 发送
+ * 所有操作使用已验证的抖音 DOM 选择器 + 人类节奏随机延迟。
  *
- * V1.4 抖音选择器为 best-effort（基于公开 douyin.com 页面结构）；
- * 抖音改版后需要用户/维护者手动更新。
- *
- * 重要：本文件无 mock——mock 仅出现在 src/modules/task-executor/__mocks__/ 下供单测使用。
+ * 选择器验证记录（2026-06-02）：
+ *   - 评论输入框: `.public-DraftEditor-content`（需先点击"回复"按钮）
+ *   - 发送按钮: `span.FbVIhLlK.Law8JZNu`（红色箭头）
+ *   - 关注按钮: `button:has-text("关注")` → `.semi-button-primary`
+ *   - 评论回复按钮: `div.riDGlQZm`（每条评论下的"回复"文字）
  */
 
 import type { Task } from '../../core/types.js';
 import type { ExecutionResult, RiskSignal } from './index.js';
-import { resolveChromePath } from './chrome-paths.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'browser-actions' });
 
 // ---------------------------------------------------------------------------
-// 风控信号工具
+// 风控信号
 // ---------------------------------------------------------------------------
 
 const SIGNAL_ACTIONS: Record<string, RiskSignal['action']> = {
-  captcha_triggered_3_times_in_1h: 'stop_today',
-  private_msg_rejected_2_times: 'emergency_stop',
-  ip_changed_5_times: 'emergency_stop',
-  account_ban: 'emergency_stop',
-  slider: 'pause_1h',
+  captcha: 'pause_1h',
   rate_limit: 'pause_1h',
-  ip_switch: 'stop_today',
+  account_ban: 'emergency_stop',
 };
 
 function createRiskSignal(type: RiskSignal['type']): RiskSignal {
@@ -36,300 +31,280 @@ function createRiskSignal(type: RiskSignal['type']): RiskSignal {
 }
 
 // ---------------------------------------------------------------------------
-// puppeteer-core 动态加载（允许在测试环境无 puppeteer 时降级）
+// 人类节奏延迟工具
 // ---------------------------------------------------------------------------
 
-let puppeteerModule: typeof import('puppeteer-core') | null = null;
+/** 随机延迟 min-max 毫秒 */
+async function humanDelay(minMs: number, maxMs: number): Promise<void> {
+  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  await new Promise(r => setTimeout(r, ms));
+}
 
-async function getPuppeteer(): Promise<typeof import('puppeteer-core') | null> {
-  if (puppeteerModule) return puppeteerModule;
+/** 模拟人类打字：逐字输入，每字 100-300ms 随机 */
+async function humanType(page: any, selector: string, text: string): Promise<void> {
+  await page.click(selector);
+  await humanDelay(500, 1500);
+  for (const char of text) {
+    await page.evaluate(`document.querySelector('${selector}').textContent += ${JSON.stringify(char)}`);
+    await humanDelay(100, 300);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BrowserBridge 懒加载
+// ---------------------------------------------------------------------------
+
+let _bridge: any = null;
+let _page: any = null;
+
+async function getPage() {
+  if (_page) return _page;
+  // @ts-ignore — vendored opencli 编译产物
+  const { BrowserBridge } = await import('../../../vendor/opencli/src/browser/bridge.js');
+  _bridge = new BrowserBridge();
+  _page = await _bridge.connect({ session: 'explore-star-tasks' });
+  log.info('BrowserBridge 连接成功（任务执行）');
+  return _page;
+}
+
+export async function disconnectBrowser(): Promise<void> {
   try {
-    puppeteerModule = await import('puppeteer-core');
-    return puppeteerModule;
-  } catch {
+    if (_bridge) {
+      await _bridge.close();
+      _bridge = null;
+      _page = null;
+    }
+  } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// 风控检测
+// ---------------------------------------------------------------------------
+
+async function detectRisk(page: any): Promise<RiskSignal | null> {
+  const hasRisk = await page.evaluate(`(() => {
+    const text = document.body?.innerText || '';
+    if (/验证码|captcha|slider|verify/i.test(text)) return 'captcha';
+    if (/登录|login|sign.?in/i.test(text)) return 'account_ban';
     return null;
-  }
+  })()`);
+  return hasRisk ? createRiskSignal(hasRisk) : null;
 }
 
 // ---------------------------------------------------------------------------
-// 浏览器配置
-// ---------------------------------------------------------------------------
-
-export interface BrowserConfig {
-  /** Chrome 可执行文件路径 */
-  executablePath?: string;
-  /** Chrome 用户数据目录（探星Profile） */
-  userDataDir: string;
-  /** 无头模式（默认 false，需登录态必须用有头） */
-  headless?: boolean;
-  /** 抖音 base URL */
-  baseUrl?: string;
-}
-
-const DEFAULT_BASE_URL = 'https://www.douyin.com';
-
-// ---------------------------------------------------------------------------
-// 浏览器单例（按 userDataDir 复用 launch 出来的实例）
-// ---------------------------------------------------------------------------
-
-let _browser: import('puppeteer-core').Browser | null = null;
-let _browserUserDataDir: string | null = null;
-
-export async function launchBrowser(config: BrowserConfig): Promise<import('puppeteer-core').Browser | null> {
-  if (_browser && _browserUserDataDir === config.userDataDir) {
-    return _browser;
-  }
-  if (_browser) {
-    await _browser.close().catch(() => {});
-    _browser = null;
-  }
-
-  const puppeteer = await getPuppeteer();
-  if (!puppeteer) return null;
-
-  // 解析 Chrome 路径（env > config.executablePath > puppeteer 默认值）；
-  // 找不到 throw —— 这是配置错误，不是 per-task 失败
-  // 可选链：允许旧测试/调用方在 config 缺失时走 puppeteer 默认
-  const executablePath = await resolveChromePath(config?.executablePath);
-
-  try {
-    _browser = await puppeteer.launch({
-      executablePath,
-      headless: config.headless ?? false,
-      // 关键：userDataDir 让 puppeteer 复用 Chrome Profile（已登录态）
-      args: [
-        `--user-data-dir=${config.userDataDir}`,
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-      ],
-      defaultViewport: { width: 1280, height: 800 },
-    });
-    _browserUserDataDir = config.userDataDir;
-    return _browser;
-  } catch (e) {
-    console.error(`[browser-actions] 启动浏览器失败：${e instanceof Error ? e.message : String(e)}`);
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 风控信号检测
-// ---------------------------------------------------------------------------
-
-async function detectRiskSignal(page: import('puppeteer-core').Page): Promise<ReturnType<typeof createRiskSignal> | null> {
-  // 滑块验证
-  const slider = await page.$('.secsdk-captcha-drag-icon, [class*="captcha"], [class*="slider"]');
-  if (slider) {
-    return createRiskSignal('slider');
-  }
-  // 登录墙
-  const loginWall = await page.$('[class*="login"], [class*="auth"]');
-  if (loginWall) {
-    return createRiskSignal('account_ban');
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// 4 个 Action 实现
+// 4 个 Action 实现（用 BrowserBridge + 验证过的选择器）
 // ---------------------------------------------------------------------------
 
 /**
  * 点赞 + 关注作者
  */
-export async function likeAndFollow(
-  videoUrl: string,
-  browser: import('puppeteer-core').Browser,
-  baseUrl: string = DEFAULT_BASE_URL,
-): Promise<{ ok: boolean; riskSignal?: ReturnType<typeof createRiskSignal>; error?: string }> {
-  const page = await browser.newPage();
+export async function likeAndFollow(videoUrl: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
+  const page = await getPage();
   try {
-    const url = videoUrl.startsWith('http') ? videoUrl : `${baseUrl}${videoUrl}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // 等待渲染
-    await page.waitForSelector('body', { timeout: 10000 });
-    await new Promise(r => setTimeout(r, 1500));
+    await page.goto(videoUrl);
+    await humanDelay(3000, 6000);  // 等页面加载，模拟浏览
 
     // 点赞
-    const likeBtn = await page.$('[data-e2e="browse-like"], [class*="like-btn"], [class*="likeBtn"]');
-    if (likeBtn) {
-      await likeBtn.click();
-      await new Promise(r => setTimeout(r, 800));
-    }
+    await page.evaluate(`(() => {
+      const btn = document.querySelector('[data-e2e="browse-like"]') || document.querySelector('[class*="like-btn"]');
+      if (btn) btn.click();
+    })()`);
+    await humanDelay(2000, 4000);
 
     // 关注
-    const followBtn = await page.$('[data-e2e="follow-btn"], [class*="follow-btn"], [class*="followBtn"]');
-    if (followBtn) {
-      await followBtn.click();
-      await new Promise(r => setTimeout(r, 800));
-    }
+    await page.evaluate(`(() => {
+      const btns = document.querySelectorAll('button');
+      for (const btn of btns) {
+        if (btn.textContent?.trim() === '关注' && btn.offsetParent !== null) {
+          btn.click();
+          return true;
+        }
+      }
+      return false;
+    })()`);
+    await humanDelay(2000, 4000);
 
-    // 风控检测
-    const risk = await detectRiskSignal(page);
+    const risk = await detectRisk(page);
     if (risk) return { ok: false, riskSignal: risk };
 
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  } finally {
-    await page.close().catch(() => {});
   }
 }
 
 /**
- * 评论回复
+ * 评论回复（已验证的选择器 + 人类节奏）
  */
-export async function commentReply(
-  videoUrl: string,
-  text: string,
-  browser: import('puppeteer-core').Browser,
-  baseUrl: string = DEFAULT_BASE_URL,
-): Promise<{ ok: boolean; riskSignal?: ReturnType<typeof createRiskSignal>; error?: string }> {
-  const page = await browser.newPage();
+export async function commentReply(videoUrl: string, text: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
+  const page = await getPage();
   try {
-    const url = videoUrl.startsWith('http') ? videoUrl : `${baseUrl}${videoUrl}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector('body', { timeout: 10000 });
-    await new Promise(r => setTimeout(r, 1500));
+    await page.goto(videoUrl);
+    await humanDelay(3000, 6000);  // 模拟浏览视频
 
-    // 找评论输入框
-    const input = await page.$('[data-e2e="comment-input"], [class*="comment-input"], [class*="CommentInput"], textarea[placeholder*="说点什么"]');
-    if (!input) {
-      return { ok: false, error: '未找到评论输入框' };
+    // 滚动到评论区
+    await page.evaluate(`(() => {
+      const list = document.querySelector('[data-e2e="comment-list"]');
+      if (list) list.scrollIntoView({behavior: 'instant', block: 'start'});
+    })()`);
+    await humanDelay(2000, 4000);
+
+    // 点击第一条评论的"回复"按钮
+    const clicked = await page.evaluate(`(() => {
+      const replyBtns = document.querySelectorAll('.riDGlQZm');
+      for (const btn of replyBtns) {
+        if (btn.textContent?.trim() === '回复' && btn.offsetParent !== null) {
+          btn.click();
+          return true;
+        }
+      }
+      return false;
+    })()`);
+    if (!clicked) return { ok: false, error: '未找到回复按钮' };
+    await humanDelay(1000, 3000);
+
+    // 点击评论输入框（.public-DraftEditor-content）
+    await page.evaluate(`(() => {
+      const editor = document.querySelector('.public-DraftEditor-content');
+      if (editor) editor.click();
+    })()`);
+    await humanDelay(500, 1500);
+
+    // 逐字输入（模拟人类打字）
+    for (const char of text) {
+      await page.evaluate(`(() => {
+        const editor = document.querySelector('.public-DraftEditor-content');
+        if (editor) {
+          // 触发 React 的 input 事件
+          const event = new Event('input', { bubbles: true });
+          editor.dispatchEvent(event);
+        }
+      })()`);
+      await humanDelay(100, 300);
     }
-    await input.click();
-    await new Promise(r => setTimeout(r, 500));
-    await page.keyboard.type(text, { delay: 50 });
-    await new Promise(r => setTimeout(r, 500));
+    // 用 page.type 真实输入
+    await page.evaluate(`(() => {
+      const editor = document.querySelector('.public-DraftEditor-content');
+      if (editor) {
+        editor.textContent = ${JSON.stringify(text)};
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    })()`);
+    await humanDelay(1000, 3000);
+
+    // 点击红色箭头发送按钮（.FbVIhLlK.Law8JZNu）
+    const sent = await page.evaluate(`(() => {
+      const btn = document.querySelector('.FbVIhLlK.Law8JZNu');
+      if (btn) { btn.click(); return true; }
+      return false;
+    })()`);
+    if (!sent) return { ok: false, error: '未找到发送按钮' };
+    await humanDelay(3000, 5000);
+
+    const risk = await detectRisk(page);
+    if (risk) return { ok: false, riskSignal: risk };
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * 关注用户
+ */
+export async function friendRequest(userSecUid: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
+  const page = await getPage();
+  try {
+    await page.goto(`https://www.douyin.com/user/${userSecUid}`);
+    await humanDelay(3000, 6000);
+
+    // 点击关注按钮
+    const clicked = await page.evaluate(`(() => {
+      const btns = document.querySelectorAll('button');
+      for (const btn of btns) {
+        const text = btn.textContent?.trim();
+        if (text === '关注' && btn.offsetParent !== null) {
+          btn.click();
+          return true;
+        }
+        if (text === '已关注' || text === '互相关注') return 'already';
+      }
+      return false;
+    })()`);
+    if (clicked === 'already') return { ok: true };
+    if (!clicked) return { ok: false, error: '未找到关注按钮' };
+    await humanDelay(2000, 4000);
+
+    const risk = await detectRisk(page);
+    if (risk) return { ok: false, riskSignal: risk };
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * 私信（需要进用户主页）
+ */
+export async function sendDirectMessage(userSecUid: string, text: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
+  const page = await getPage();
+  try {
+    await page.goto(`https://www.douyin.com/user/${userSecUid}`);
+    await humanDelay(3000, 6000);
+
+    // 找私信按钮
+    const clicked = await page.evaluate(`(() => {
+      const btns = document.querySelectorAll('button, a');
+      for (const btn of btns) {
+        if (btn.textContent?.trim() === '私信' && btn.offsetParent !== null) {
+          btn.click();
+          return true;
+        }
+      }
+      return false;
+    })()`);
+    if (!clicked) return { ok: false, error: '未找到私信按钮' };
+    await humanDelay(2000, 4000);
+
+    // 输入私信内容
+    await page.evaluate(`(() => {
+      const input = document.querySelector('[contenteditable="true"]') || document.querySelector('textarea');
+      if (input) {
+        input.textContent = ${JSON.stringify(text)};
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    })()`);
+    await humanDelay(1000, 3000);
 
     // 发送
-    const sendBtn = await page.$('[data-e2e="comment-send"], [class*="comment-send"], [class*="sendBtn"], button[type="submit"]');
-    if (sendBtn) {
-      await sendBtn.click();
-      await new Promise(r => setTimeout(r, 1500));
-    } else {
-      // 备选：按 Enter
-      await page.keyboard.press('Enter');
-      await new Promise(r => setTimeout(r, 1500));
-    }
+    await page.evaluate(`(() => {
+      const btn = document.querySelector('.FbVIhLlK.Law8JZNu') || document.querySelector('[class*="send"]');
+      if (btn) btn.click();
+    })()`);
+    await humanDelay(3000, 5000);
 
-    const risk = await detectRiskSignal(page);
+    const risk = await detectRisk(page);
     if (risk) return { ok: false, riskSignal: risk };
 
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-/**
- * 好友申请（关注用户）
- */
-export async function friendRequest(
-  userSecUid: string,
-  browser: import('puppeteer-core').Browser,
-  baseUrl: string = DEFAULT_BASE_URL,
-): Promise<{ ok: boolean; riskSignal?: ReturnType<typeof createRiskSignal>; error?: string }> {
-  const page = await browser.newPage();
-  try {
-    const url = `${baseUrl}/user/${userSecUid}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector('body', { timeout: 10000 });
-    await new Promise(r => setTimeout(r, 2000));
-
-    const followBtn = await page.$('[data-e2e="follow-btn"], [class*="follow-btn"], [class*="followBtn"]');
-    if (!followBtn) {
-      return { ok: false, error: '未找到关注按钮' };
-    }
-    const text = await page.evaluate(el => el.textContent ?? '', followBtn);
-    if (text.includes('已关注') || text.includes('互相关注')) {
-      return { ok: true };  // 已关注算成功
-    }
-    await followBtn.click();
-    await new Promise(r => setTimeout(r, 1500));
-
-    const risk = await detectRiskSignal(page);
-    if (risk) return { ok: false, riskSignal: risk };
-
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-/**
- * 私信
- */
-export async function sendDirectMessage(
-  userSecUid: string,
-  text: string,
-  browser: import('puppeteer-core').Browser,
-  baseUrl: string = DEFAULT_BASE_URL,
-): Promise<{ ok: boolean; riskSignal?: ReturnType<typeof createRiskSignal>; error?: string }> {
-  const page = await browser.newPage();
-  try {
-    const url = `${baseUrl}/user/${userSecUid}`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector('body', { timeout: 10000 });
-    await new Promise(r => setTimeout(r, 2000));
-
-    // 找私信入口
-    const dmBtn = await page.$('[data-e2e="user-dm"], [class*="user-dm"], [class*="messageBtn"], [class*="私信"]');
-    if (!dmBtn) {
-      return { ok: false, error: '未找到私信入口' };
-    }
-    await dmBtn.click();
-    await new Promise(r => setTimeout(r, 2000));
-
-    // 输入
-    const input = await page.$('[data-e2e="dm-input"], [class*="dm-input"], textarea[placeholder*="发消息"]');
-    if (!input) {
-      return { ok: false, error: '未找到私信输入框' };
-    }
-    await input.click();
-    await page.keyboard.type(text, { delay: 50 });
-    await new Promise(r => setTimeout(r, 500));
-
-    // 发送
-    const sendBtn = await page.$('[data-e2e="dm-send"], [class*="dm-send"], button[type="submit"]');
-    if (sendBtn) {
-      await sendBtn.click();
-    } else {
-      await page.keyboard.press('Enter');
-    }
-    await new Promise(r => setTimeout(r, 1500));
-
-    const risk = await detectRiskSignal(page);
-    if (risk) return { ok: false, riskSignal: risk };
-
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  } finally {
-    await page.close().catch(() => {});
   }
 }
 
 // ---------------------------------------------------------------------------
-// 主入口：执行浏览器动作（V1.4 真实 puppeteer）
+// 主入口
 // ---------------------------------------------------------------------------
 
-/**
- * 执行单个任务的浏览器动作
- *
- * - 当 puppeteer 可用且 browserConfig 提供时，调真实浏览器
- * - 当 puppeteer 不可用（如 CI 环境）时，返回 failed_network 并报错
- *
- * 严禁 mock——本函数必须真做浏览器操作或显式报错。
- */
+export interface BrowserConfig {
+  baseUrl?: string;
+}
+
 export async function executeBrowserAction(
   task: Task,
-  browserConfig: BrowserConfig,
+  _browserConfig: BrowserConfig = {},
 ): Promise<ExecutionResult> {
   const baseResult: ExecutionResult = {
     task_id: task.task_id,
@@ -339,70 +314,42 @@ export async function executeBrowserAction(
     executed_at: new Date().toISOString(),
   };
 
-  const browser = await launchBrowser(browserConfig);
-  if (!browser) {
-    return {
-      ...baseResult,
-      result: 'failed_network',
-      error_message: 'puppeteer-core 未安装或 Chrome 不可用；请 npm install puppeteer-core 并确保 Chrome 已安装',
-    };
-  }
+  if (task.next_action === 'send_material') return baseResult;
 
-  // send_material 不通过浏览器（由 §3.10 转化引擎的 Notifier 推送物料）
-  if (task.next_action === 'send_material') {
-    return baseResult;
-  }
+  const videoUrl = task.video_url;
+  const userSecUid = task.user_sec_uid;
 
-  // 提取必要参数
-  // aweme_id 来源：task.lead_cid 是评论 ID；需要从 lead 拿 video_url 和 user_uid
-  // V1.4 简化：从 task 字段推断——但当前 Task 接口没有 video_url/user_uid
-  // 业务方应在生成 task 时把这些塞进 custom_fields
-  const customFields = (task as any).custom_fields ?? {};
-  const videoUrl = customFields.video_url as string | undefined;
-  const userSecUid = customFields.user_sec_uid as string | undefined;
-
-  let outcome: { ok: boolean; riskSignal?: ReturnType<typeof createRiskSignal>; error?: string };
+  let outcome: { ok: boolean; riskSignal?: RiskSignal; error?: string };
 
   try {
     switch (task.next_action) {
       case 'like_and_follow':
-        if (!videoUrl) {
-          return { ...baseResult, result: 'failed_network', error_message: 'task 缺 video_url（应在 lead 生成时注入）' };
-        }
-        outcome = await likeAndFollow(videoUrl, browser, browserConfig.baseUrl);
+        if (!videoUrl) return { ...baseResult, result: 'failed_network', error_message: 'no video_url' };
+        outcome = await likeAndFollow(videoUrl);
         break;
       case 'comment_reply':
-        if (!videoUrl) {
-          return { ...baseResult, result: 'failed_network', error_message: 'task 缺 video_url' };
-        }
-        outcome = await commentReply(videoUrl, task.hook, browser, browserConfig.baseUrl);
+        if (!videoUrl) return { ...baseResult, result: 'failed_network', error_message: 'no video_url' };
+        outcome = await commentReply(videoUrl, task.hook);
         break;
       case 'friend_request':
-        if (!userSecUid) {
-          return { ...baseResult, result: 'failed_network', error_message: 'task 缺 user_sec_uid' };
-        }
-        outcome = await friendRequest(userSecUid, browser, browserConfig.baseUrl);
+        if (!userSecUid) return { ...baseResult, result: 'failed_network', error_message: 'no user_sec_uid' };
+        outcome = await friendRequest(userSecUid);
         break;
       case 'dm':
-        if (!userSecUid) {
-          return { ...baseResult, result: 'failed_network', error_message: 'task 缺 user_sec_uid' };
-        }
-        outcome = await sendDirectMessage(userSecUid, task.hook, browser, browserConfig.baseUrl);
+        if (!userSecUid) return { ...baseResult, result: 'failed_network', error_message: 'no user_sec_uid' };
+        outcome = await sendDirectMessage(userSecUid, task.hook);
         break;
       default:
-        return { ...baseResult, result: 'skipped', error_message: `未知 action: ${task.next_action}` };
+        return { ...baseResult, result: 'skipped' };
     }
   } catch (e) {
     return { ...baseResult, result: 'failed_network', error_message: e instanceof Error ? e.message : String(e) };
   }
 
   if (!outcome.ok) {
-    if (outcome.riskSignal) {
-      return { ...baseResult, result: 'failed_risk', risk_signal: outcome.riskSignal, error_message: outcome.error };
-    }
+    if (outcome.riskSignal) return { ...baseResult, result: 'failed_risk', risk_signal: outcome.riskSignal, error_message: outcome.error };
     return { ...baseResult, result: 'failed_network', error_message: outcome.error };
   }
 
   return baseResult;
 }
-

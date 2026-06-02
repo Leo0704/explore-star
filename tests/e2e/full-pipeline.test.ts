@@ -7,7 +7,7 @@
  * 唯一区别：mode='read-only' 跳过浏览器任务执行（避免真实操作抖音账号）。
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolve } from 'node:path';
 
 const REQUIRED_ENV = ['CUSTOM_API_KEY', 'FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_APP_TOKEN', 'FEISHU_TABLE_ID'];
@@ -22,6 +22,12 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
   beforeAll(() => {
     process.env.CUSTOM_MODEL = process.env.CUSTOM_MODEL || 'mimo-v2.5-pro';
     process.env.CUSTOM_BASE_URL = process.env.CUSTOM_BASE_URL || 'https://token-plan-sgp.xiaomimimo.com/v1';
+  });
+
+  afterAll(async () => {
+    // 清理 BrowserBridge 连接，防止 daemon 进程泄漏
+    const { disconnectDouyinChannel } = await import('../../src/adapters/channel/douyin.js');
+    await disconnectDouyinChannel();
   });
 
   it('跟 npx explore-star run 完全一样的流水线', async () => {

@@ -6,7 +6,7 @@
 #   - both: 两条路径都跑
 
 source:
-  mode: "sec_uid"  # V1.4 默认推荐 sec_uid
+  mode: "keyword"  # E2E: keyword 模式
 
 # === 模式 B: 目标 KOL（推荐）===
 target_sec_uids:

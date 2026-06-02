@@ -230,85 +230,21 @@ export type { HookReviewConfig } from './hook-review.js';
 // ---------------------------------------------------------------------------
 
 export interface BrowserExecuteOptions {
-  /** Chrome 用户数据目录（探星Profile） */
-  chromeProfile?: string;
-  /** Chrome 可执行文件路径 */
-  executablePath?: string;
-  headless?: boolean;
-  /** 注入 fake browser 用于单测（不允许用于生产） */
-  __fakeBrowser?: import('puppeteer-core').Browser;
   /** CRM adapter：executeTasks 末尾按 action 推进 lead.status（Finding 2） */
   crm?: CRMAdapter;
 }
 
 /**
- * 通过登录态浏览器执行单个任务（V1.4 真浏览器）
+ * 通过登录态浏览器执行单个任务（基于 BrowserBridge）
  */
 export async function browserExecute(
   task: Task,
-  opts: BrowserExecuteOptions = {}
+  _opts: BrowserExecuteOptions = {}
 ): Promise<ExecutionResult> {
   const { executeBrowserAction } = await import('./browser-actions.js');
-
-  // 单元测试路径：允许注入 fake browser（__fakeBrowser）来 mock puppeteer；
-  // 这里 mock 的是 puppeteer 库本身，不是 action 逻辑
-  if (opts.__fakeBrowser) {
-    return executeBrowserActionWithBrowser(task, opts.__fakeBrowser);
-  }
-
-  const browserConfig = {
-    executablePath: opts.executablePath,
-    userDataDir: opts.chromeProfile ?? '~/.config/google-chrome/Default',
-    headless: opts.headless ?? false,
-  };
-
-  return executeBrowserAction(task, browserConfig);
+  return executeBrowserAction(task);
 }
 
-async function executeBrowserActionWithBrowser(
-  task: Task,
-  browser: import('puppeteer-core').Browser
-): Promise<ExecutionResult> {
-  // 单测 helper：直接复用 browser-actions 的真逻辑，但注入 fake browser
-  const { likeAndFollow, commentReply, friendRequest, sendDirectMessage } = await import('./browser-actions.js');
-  const videoUrl = task.video_url;
-  const userSecUid = task.user_sec_uid;
-  const baseResult: ExecutionResult = {
-    task_id: task.task_id,
-    lead_cid: task.lead_cid,
-    action: task.next_action,
-    result: 'executed_with_response',
-    executed_at: new Date().toISOString(),
-  };
-  if (task.next_action === 'send_material') return baseResult;
-
-  let outcome;
-  switch (task.next_action) {
-    case 'like_and_follow':
-      if (!videoUrl) return { ...baseResult, result: 'failed_network', error_message: 'no video_url' };
-      outcome = await likeAndFollow(videoUrl, browser);
-      break;
-    case 'comment_reply':
-      if (!videoUrl) return { ...baseResult, result: 'failed_network', error_message: 'no video_url' };
-      outcome = await commentReply(videoUrl, task.hook, browser);
-      break;
-    case 'friend_request':
-      if (!userSecUid) return { ...baseResult, result: 'failed_network', error_message: 'no user_sec_uid' };
-      outcome = await friendRequest(userSecUid, browser);
-      break;
-    case 'dm':
-      if (!userSecUid) return { ...baseResult, result: 'failed_network', error_message: 'no user_sec_uid' };
-      outcome = await sendDirectMessage(userSecUid, task.hook, browser);
-      break;
-    default:
-      return { ...baseResult, result: 'skipped' };
-  }
-  if (!outcome.ok) {
-    if (outcome.riskSignal) return { ...baseResult, result: 'failed_risk', risk_signal: outcome.riskSignal };
-    return { ...baseResult, result: 'failed_network', error_message: outcome.error };
-  }
-  return baseResult;
-}
 
 // ---------------------------------------------------------------------------
 // 批量任务执行
