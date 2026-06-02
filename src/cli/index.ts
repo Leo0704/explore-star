@@ -14,6 +14,7 @@
  *   explore-star watch-bookings          —— 监听预约
  *   explore-star configure               —— 修改业务配置
  *   explore-star retry-dlq               —— 重试 CRM 同步失败队列
+ *   explore-star status                  —— 查看 run 健康概览
  */
 
 const USAGE = `
@@ -31,6 +32,7 @@ const USAGE = `
   watch-bookings           启动预约监听循环
   configure                查看/修改业务配置
   retry-dlq                重试 CRM 同步失败队列（适合 cron）
+  status                  查看 run 健康概览（--business 必填，--days / --json 可选）
 
 全局选项：
   --help, -h               显示帮助
@@ -112,6 +114,11 @@ async function main() {
       }
       case 'retry-dlq': {
         const { runCLI } = await import('./retry-dlq.js');
+        await runCLI(rest);
+        break;
+      }
+      case 'status': {
+        const { runCLI } = await import('./status.js');
         await runCLI(rest);
         break;
       }

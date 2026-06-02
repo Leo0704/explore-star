@@ -22,7 +22,8 @@
     "nurture": "node dist/cli/nurture.js",
     "convert": "node dist/cli/convert.js",
     "insights": "node dist/cli/insights.js",
-    "retry-dlq": "node dist/cli/retry-dlq.js"
+    "retry-dlq": "node dist/cli/retry-dlq.js",
+    "status": "node dist/cli/status.js"
   },
   "keywords": [
     "douyin",
