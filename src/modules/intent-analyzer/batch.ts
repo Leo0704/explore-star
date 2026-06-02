@@ -64,6 +64,17 @@ export interface BatchContext {
   threshold: number;
   /** 本批次统一使用的钩子风格（§3.11 回路 2 归因必填） */
   hookStyle?: string;
+  /**
+   * Phase 2 #4: cost 埋点(可选)
+   * - cache miss:自动 recordUsage(prompt, response)
+   * - cache hit:不调用 fetcher,不重复计 token
+   */
+  costTracker?: CostTracker;
+  /**
+   * Phase 2 #4: 用于 cache key 区分(默认 'unknown')
+   * 生产环境由 run-daily 注入 profile.llm.model
+   */
+  modelName?: string;
 }
 
 export type BatchRejectedItem = { cid: string; reason: string; raw?: string };
@@ -107,8 +118,25 @@ export async function analyzeBatch(
     ? `\n\n【钩子风格引导】本批次请使用「${ctx.hookStyle}」风格生成回复/私信钩子文案。`
     : '';
 
+  // Phase 2 #4:把完整 prompt 拼一次,cache + cost tracker 共用
+  const fullPrompt = `${systemPrompt}\n\n${userPrompt}${hookStyleHint}\n\n【输出 JSON 数组】`;
+
   try {
-    rawOutput = await llm.complete(`${systemPrompt}\n\n${userPrompt}${hookStyleHint}\n\n【输出 JSON 数组】`);
+    // Phase 2 #4:走 completeWithCache —— 重复输入不调 LLM
+    // cache key = sha256(modelName + system + userPrompt);userPrompt 含评论列表内容
+    rawOutput = await completeWithCache({
+      model: ctx.modelName ?? 'unknown',
+      systemPrompt: `${systemPrompt}${hookStyleHint}`,
+      userPrompt,
+      fetcher: async () => {
+        const r = await llm.complete(fullPrompt);
+        // cache miss 时记 token;cache hit 时 fetcher 根本不被调
+        if (ctx.costTracker) {
+          ctx.costTracker.recordUsage(fullPrompt, r);
+        }
+        return r;
+      },
+    });
   } catch (e) {
     llmErrors++;
     return {
