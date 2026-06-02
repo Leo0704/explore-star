@@ -226,7 +226,7 @@ export async function reviewHook(
 export type { HookReviewConfig } from './hook-review.js';
 
 // ---------------------------------------------------------------------------
-// 浏览器执行（V1.4 真实 puppeteer-core，§3.6.5）
+// 浏览器执行（基于 opencli BrowserBridge）
 // ---------------------------------------------------------------------------
 
 export interface BrowserExecuteOptions {

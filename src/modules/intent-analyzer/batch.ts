@@ -2,12 +2,18 @@
  * 批处理器（10 条/批）
  *
  * analyzeComments 的实际批处理逻辑，暴露给编排器直接调用。
+ *
+ * Phase 2 #4（roadmap §2.4）:
+ *   - LLM 调用走 completeWithCache，重复输入不调 LLM
+ *   - 注入 costTracker 后，每次 cache miss 自动累加 token/cost
  */
 
 import Handlebars from 'handlebars';
 import { z } from 'zod';
 
 import type { Comment, Lead, BusinessProfile } from '../../core/types.js';
+import { completeWithCache } from '../../adapters/llm/_cache.js';
+import type { CostTracker } from '../../adapters/llm/_cost-tracker.js';
 
 // ---------------------------------------------------------------------------
 // 安全：用户评论字段的硬上限（防 prompt 注入 / 上下文爆量）
