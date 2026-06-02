@@ -77,4 +77,4 @@ export async function runCLI(args: string[]): Promise<void> {
   await runAnalyze(args);
 }
 
-selfInvoke(runCLI);
+selfInvoke(import.meta.url, runCLI);

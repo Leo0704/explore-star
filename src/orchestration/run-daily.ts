@@ -5,16 +5,24 @@
  *   - 串联 7 步（侦察→分析→同步→任务→执行→通知→健康检查）
  *   - 支持断点续传（state.ts）
  *   - 支持 --dry-run / --skip-llm / --step
+ *
+ * Phase 0 PR 1：在 finally 块写 run_history（data/run_history.jsonl）
+ *   - runDaily 主体加 try/catch/finally
+ *   - runDailyBody 签名加 stepDurations + phaseCounts 输出参数
+ *   - 每个 step 入口/出口加 step 计时
+ *   - 收尾填 phaseCounts
  */
 
 import { existsSync } from 'node:fs';
 
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getChannel, getNotifier } from '../adapters/registry.js';
-import type { Comment, Lead, Task } from '../core/types.js';
+import type { Comment, Lead, Notifier, BusinessProfile, Task } from '../core/types.js';
 import { executeTasks, loadSafetyConfig, type ExecutionResult, type SafetyConfig } from '../modules/task-executor/index.js';
 import { loadState, updateStep, markComplete, resetForNewDay } from './state.js';
 import { logger } from '../core/logger.js';
+import { appendRunHistory, type RunHistoryEntry } from './run-history.js';
+import { resolveNotifiers as defaultResolveNotifiers } from '../core/notifier-resolver.js';
 
 const log = logger.child({ module: 'run-daily' });
 
@@ -35,6 +43,14 @@ export interface RunDailyOptions {
   injectExecuteTasks?: typeof import('../modules/task-executor/index.js').executeTasks;
   /** 测试注入：覆盖 generateDailyTasks */
   injectGenerateDailyTasks?: typeof import('../modules/nurture-engine/index.js').generateDailyTasks;
+  /** 测试注入：自定义 run_history 路径（默认 data/run_history.jsonl） */
+  injectHistoryPath?: string;
+  /** 测试注入：是否写 history（默认 true；测试可关） */
+  injectWriteHistory?: boolean;
+  /** 测试注入：覆盖 notifier 列表（默认从 observability 配置读） */
+  injectNotifiers?: Notifier[];
+  /** 测试注入：覆盖 notifier 解析函数 */
+  injectResolveNotifiers?: (profile: BusinessProfile) => Notifier[];
 }
 
 export interface RunDailyResult {
@@ -104,13 +120,74 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     await resetForNewDay();
   }
 
+  const historyPath = opts.injectHistoryPath ?? './data/run_history.jsonl';
+  const writeHistory = opts.injectWriteHistory !== false;
+  const startedAt = new Date().toISOString();
+  const runId = crypto.randomUUID();
+  let exitReason: RunHistoryEntry['exit_reason'] = 'failed';
+  const stepDurations: Record<string, number> = {};
+  const phaseCounts: RunHistoryEntry['phase_counts'] = {
+    videos_scanned: 0, comments_collected: 0, leads_created: 0, tasks_generated: 0, tasks_executed: 0,
+  };
+
   try {
-    return await runDailyBody(opts, t0, date, errors);
+    const result = await runDailyBody(opts, t0, date, errors, stepDurations, phaseCounts);
+    exitReason = errors.length === 0 ? 'completed' : 'failed';
+    return result;
   } catch (e) {
     if (e instanceof LoginRequiredError) {
+      exitReason = 'login_required';
+      // 立即通知（不等 finally）—— LoginRequiredError 是 R1 fail-loud 信号
+      const notifiers = opts.injectNotifiers ?? await loadAndResolveNotifiers(opts);
+      for (const n of notifiers) {
+        await sendWithTimeout(n, {
+          title: '探星：需要登录抖音',
+          body: `业务 ${opts.businessDir} 的 run 在 ${new Date().toISOString()} 触发 LoginRequiredError。\n请检查 opencli / Chrome 登录态。`,
+          level: 'critical',
+        });
+      }
       await handleLoginRequired(opts.businessDir);
+    } else {
+      exitReason = 'failed';
     }
     throw e;
+  } finally {
+    if (writeHistory) {
+      try {
+        await appendRunHistory(historyPath, {
+          run_id: runId,
+          business: opts.businessDir,
+          mode: opts.mode ?? 'full',
+          dry_run: !!opts.dryRun,
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+          duration_ms: Date.now() - t0,
+          exit_reason: exitReason,
+          step_durations: stepDurations,
+          phase_counts: phaseCounts,
+          errors,
+        });
+      } catch (historyErr) {
+        log.error({ err: historyErr, runId }, '写 run_history 失败（不阻塞主流程）');
+      }
+    }
+
+    // 失败路径（非 login_required）发 warning 告警；login_required 已在 catch 内发 critical
+    // 关键：login_required 在 catch 已发，不再重复发；completed 也不发
+    if (exitReason === 'failed') {
+      try {
+        const notifiers = opts.injectNotifiers ?? await loadAndResolveNotifiers(opts);
+        for (const n of notifiers) {
+          await sendWithTimeout(n, {
+            title: `探星：run 失败 (${exitReason})`,
+            body: `业务 ${opts.businessDir} 在 ${new Date().toISOString()} run 失败，exit_reason=${exitReason}，错误数=${errors.length}。\n首条错误：${errors[0] ?? '(无)'}`,
+            level: 'warning',
+          });
+        }
+      } catch (notifErr) {
+        log.error({ err: notifErr }, 'finally 块 notifier 发送异常（不阻塞）');
+      }
+    }
   }
 }
 
@@ -120,45 +197,89 @@ async function runDailyBody(
   t0: number,
   date: string,
   errors: string[],
+  stepDurations: Record<string, number>,
+  phaseCounts: RunHistoryEntry['phase_counts'],
 ): Promise<RunDailyResult> {
-  // 1. 加载业务配置
-  await updateStep(0, 'running');
-  const loaded = await loadBusinessProfile(opts.businessDir);
-  const { profile, channels, conversion, knowledgeDir } = loaded;
-  await updateStep(0, 'completed', { mode: channels.source?.mode ?? 'sec_uid' });
-
-  // 2. 注册所有内置 adapter
-  await registerBuiltins();
-
-  // 2.5 R1：登录态前置检查 —— 未登录则 throw LoginRequiredError，外层会飞书告警 + 停手
-  // 测试可通过 opts.injectChannel 注入 mock channel
-  await assertLoggedIn(opts.injectChannel ?? getChannel('douyin'));
-
-  // 3. 选数据源模式
-  const mode = channels.source?.mode ?? 'sec_uid';
-
+  // -------------------------------------------------------------------------
+  // Step 1: reconnaissance（profile 加载 → 拉评论）
+  // Phase 0 PR 1：包 try/catch 加 step 计时
+  // 关键：LoginRequiredError 必须重新 throw 到外层 runDaily
+  // 关键 2：reconnaissance 内部声明的 const 后续 step 要用 —— 全部 hoist 到 try 外
+  // -------------------------------------------------------------------------
+  const stepStart_recon = Date.now();
+  let loaded: Awaited<ReturnType<typeof loadBusinessProfile>> | null = null;
+  let profile: import('../core/types.js').BusinessProfile | null = null;
+  let channels: import('../core/types.js').ChannelsConfig | null = null;
+  let conversion: import('../core/types.js').ConversionConfig | null = null;
+  let knowledgeDir: string | null = null;
   let comments: Comment[] = [];
   let videosScanned = 0;
-
-  if (mode === 'sec_uid' || mode === 'both') {
+  try {
+    // 1. 加载业务配置
     await updateStep(0, 'running');
-    const result = await fetchViaSecUid(channels, knowledgeDir, opts);
-    comments.push(...result.comments);
-    videosScanned += result.videos;
+    loaded = await loadBusinessProfile(opts.businessDir);
+    profile = loaded.profile;
+    channels = loaded.channels;
+    conversion = loaded.conversion;
+    knowledgeDir = loaded.knowledgeDir;
+    await updateStep(0, 'completed', { mode: channels.source?.mode ?? 'sec_uid' });
+
+    // 2. 注册所有内置 adapter
+    await registerBuiltins();
+
+    // 2.5 R1：登录态前置检查 —— 未登录则 throw LoginRequiredError，外层会飞书告警 + 停手
+    // 测试可通过 opts.injectChannel 注入 mock channel
+    await assertLoggedIn(opts.injectChannel ?? getChannel('douyin'));
+
+    // 3. 选数据源模式
+    const mode = channels.source?.mode ?? 'sec_uid';
+
+    // 3.5 keyword/both 模式：用 LLM 从业务画像自动生成搜索关键词
+    if (mode === 'keyword' || mode === 'both') {
+      const llmForKw = opts.injectLLM
+        ? opts.injectLLM
+        : (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
+      const { generateSearchKeywords } = await import('../modules/keyword-generator.js');
+      const generated = await generateSearchKeywords(profile, llmForKw);
+      if (Object.keys(generated).length > 0) {
+        channels.search = {
+          ...channels.search,
+          keywords: { ...channels.search?.keywords, ...generated },
+        };
+        log.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
+      }
+    }
+
+    if (mode === 'sec_uid' || mode === 'both') {
+      await updateStep(0, 'running');
+      const result = await fetchViaSecUid(channels, knowledgeDir, opts);
+      comments.push(...result.comments);
+      videosScanned += result.videos;
+    }
+
+    if (mode === 'keyword' || mode === 'both') {
+      await updateStep(0, 'running');
+      const result = await fetchViaKeyword(channels, knowledgeDir, opts);
+      comments.push(...result.comments);
+      videosScanned += result.videos;
+    }
+
+    log.info({ comments: comments.length, videos: videosScanned }, '收集评论');
+    await updateStep(0, 'completed', { comments, videosScanned });
+    stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
+  } catch (e) {
+    stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
+    throw e;
   }
 
-  if (mode === 'keyword' || mode === 'both') {
-    await updateStep(0, 'running');
-    const result = await fetchViaKeyword(channels, knowledgeDir, opts);
-    comments.push(...result.comments);
-    videosScanned += result.videos;
-  }
-
-  log.info({ comments: comments.length, videos: videosScanned }, '收集评论');
-  await updateStep(0, 'completed', { comments, videosScanned });
+  // -------------------------------------------------------------------------
+  // Step 2: analysis（预处理 + LLM 意图分析 + RAG 钩子）
+  // Phase 0 PR 1：已包局部 try/catch，加 stepDurations
+  // -------------------------------------------------------------------------
+  await updateStep(1, 'running');
+  const stepStart_analysis = Date.now();
 
   // 4. 预处理（去重 / 过滤）
-  await updateStep(1, 'running');
   const filtered = preprocessComments(comments, channels);
   log.info({ filtered: filtered.length }, '过滤评论');
   await updateStep(1, 'completed', { filtered: filtered.length });
@@ -194,10 +315,15 @@ async function runDailyBody(
         leads.push(...result.leads);
         result.rejected.forEach(r => errors.push(`[reject] ${r.cid}: ${r.reason}`));
       }
+      stepDurations['analysis'] = Date.now() - stepStart_analysis;
     } catch (e) {
       errors.push(`LLM 分析失败：${e instanceof Error ? e.message : String(e)}`);
+      stepDurations['analysis'] = Date.now() - stepStart_analysis;
     }
     await updateStep(1, 'completed', { leadsCreated: leads.length });
+  } else {
+    // filtered.length === 0 → analysis 跳过，但也记 0 耗时
+    stepDurations['analysis'] = Date.now() - stepStart_analysis;
   }
   log.info({ leads: leads.length }, '生成 lead');
 
@@ -206,7 +332,8 @@ async function runDailyBody(
   if (leads.length > 0) {
     try {
       const { getEmbedding } = await import('../adapters/registry.js');
-      const embeddingProvider = getEmbedding('openai');
+      // 默认用国产通义（Q1 切换）；如果用户只配了 OPENAI_API_KEY 会在 getEmbedding 里 fail-loud 报错
+      const embeddingProvider = getEmbedding('qwen');
       const { generateHook } = await import('../rag/hook-generator.js');
 
       let ragSuccess = 0;
@@ -238,8 +365,12 @@ async function runDailyBody(
     }
   }
 
-  // 6. CRM 同步
+  // -------------------------------------------------------------------------
+  // Step 3: sync（CRM 同步）
+  // Phase 0 PR 1：已包局部 try/catch，加 stepDurations
+  // -------------------------------------------------------------------------
   await updateStep(2, 'running');
+  const stepStart_sync = Date.now();
   if (leads.length > 0 && !opts.dryRun) {
     try {
       const crm = await createCRM(profile);
@@ -249,16 +380,23 @@ async function runDailyBody(
         syncResult.errors.forEach(e => errors.push(`[crm] ${e.cid}: ${e.error}`));
       }
       await updateStep(2, 'completed', syncResult);
+      stepDurations['sync'] = Date.now() - stepStart_sync;
     } catch (e) {
       errors.push(`CRM 同步失败：${e instanceof Error ? e.message : String(e)}`);
       await updateStep(2, 'failed', undefined, String(e));
+      stepDurations['sync'] = Date.now() - stepStart_sync;
     }
   } else {
     await updateStep(2, 'completed', { skipped: true });
+    stepDurations['sync'] = Date.now() - stepStart_sync;
   }
 
-  // 7. 引导任务生成
+  // -------------------------------------------------------------------------
+  // Step 4: task_generation（生成引导任务）
+  // Phase 0 PR 1：已包局部 try/catch，加 stepDurations
+  // -------------------------------------------------------------------------
   await updateStep(3, 'running');
+  const stepStart_taskgen = Date.now();
   let tasksCount = 0;
   let tasks: Task[] = [];
   if (!opts.dryRun) {
@@ -280,17 +418,24 @@ async function runDailyBody(
       await writeFile(tasksPath, JSON.stringify(tasks, null, 2), 'utf-8');
       log.info({ count: tasksCount, path: tasksPath }, '生成任务');
       await updateStep(3, 'completed', { tasksCount });
+      stepDurations['task_generation'] = Date.now() - stepStart_taskgen;
     } catch (e) {
       errors.push(`任务生成失败：${e instanceof Error ? e.message : String(e)}`);
       await updateStep(3, 'failed', undefined, String(e));
+      stepDurations['task_generation'] = Date.now() - stepStart_taskgen;
     }
   } else {
     await updateStep(3, 'completed', { skipped: true });
+    stepDurations['task_generation'] = Date.now() - stepStart_taskgen;
   }
 
-  // 7b. 任务执行（§3.6.5）—— 把生成的 task 喂给 task-executor
+  // -------------------------------------------------------------------------
+  // Step 5: execution（7b 任务执行 + 7c 转化引擎）
+  // Phase 0 PR 1：统一在 step 末尾记 stepDurations
+  // -------------------------------------------------------------------------
   let tasksExecuted = 0;
   let executionResults: ExecutionResult[] = [];
+  const stepStart_exec = Date.now();
   if (!opts.dryRun && tasks.length > 0 && opts.mode !== 'read-only') {
     try {
       const safety: SafetyConfig = loadSafetyConfig();
@@ -332,9 +477,14 @@ async function runDailyBody(
       errors.push(`转化引擎失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
+  stepDurations['execution'] = Date.now() - stepStart_exec;
 
-  // 8. 通知
+  // -------------------------------------------------------------------------
+  // Step 6: notification
+  // Phase 0 PR 1：已包局部 try/catch，加 stepDurations
+  // -------------------------------------------------------------------------
   await updateStep(5, 'running');
+  const stepStart_notif = Date.now();
   try {
     const notifier = getNotifier('console');
     const modeNote = opts.mode === 'read-only' ? '\n🔒 模式：read-only（已跳过任务执行）' : '';
@@ -344,9 +494,11 @@ async function runDailyBody(
       level: 'info',
     });
     await updateStep(5, 'completed', { notified: true });
+    stepDurations['notification'] = Date.now() - stepStart_notif;
   } catch (e) {
     errors.push(`通知失败：${e instanceof Error ? e.message : String(e)}`);
     await updateStep(5, 'failed', undefined, String(e));
+    stepDurations['notification'] = Date.now() - stepStart_notif;
   }
 
   const result: RunDailyResult = {
@@ -359,6 +511,13 @@ async function runDailyBody(
     duration_ms: Date.now() - t0,
     errors,
   };
+
+  // Phase 0 PR 1：填 phase_counts（finally 块用来落 history）
+  phaseCounts.videos_scanned = result.videosScanned;
+  phaseCounts.comments_collected = result.commentsCollected;
+  phaseCounts.leads_created = result.leadsCreated;
+  phaseCounts.tasks_generated = result.tasksGenerated;
+  phaseCounts.tasks_executed = result.tasksExecuted;
 
   await markComplete(true);
   log.info({ duration_ms: result.duration_ms, errors: errors.length }, '完成');
@@ -447,20 +606,58 @@ async function fetchViaKeyword(
     }
   }
 
+  // 搜到视频后，拉真实评论（不再是视频标题当评论）
+  const douyinChannel = channel as import('../adapters/channel/douyin.js').DouyinChannel;
+  let commentCount = 0;
+
   for (const v of videos) {
     if (!v.aweme_id) continue;
-    comments.push({
-      cid: `${v.aweme_id}-desc`,
-      aweme_id: v.aweme_id,
-      video_url: v.url,
-      video_desc: v.desc,
-      keyword: 'video_desc_only',
-      text: v.desc,
-      user: { nickname: v.author, uid: '', follower_count: 0, signature: '' },
-      digg_count: v.likes,
-      create_time: '',
-      reply_count: 0,
-    });
+    try {
+      const videoComments = await douyinChannel.getVideoComments(v.aweme_id, 10);
+      for (const c of videoComments) {
+        comments.push({
+          cid: `${v.aweme_id}-${c.nickname}-${commentCount++}`,
+          aweme_id: v.aweme_id,
+          video_url: v.url,
+          video_desc: v.desc,
+          keyword: v.desc?.slice(0, 20) ?? '',
+          text: c.text,
+          user: { nickname: c.nickname, uid: c.uid, follower_count: 0, signature: '' },
+          digg_count: c.digg_count,
+          create_time: '',
+          reply_count: 0,
+        });
+      }
+      // 如果该视频没有评论，用视频描述作为 fallback
+      if (videoComments.length === 0) {
+        comments.push({
+          cid: `${v.aweme_id}-desc`,
+          aweme_id: v.aweme_id,
+          video_url: v.url,
+          video_desc: v.desc,
+          keyword: 'video_desc_only',
+          text: v.desc,
+          user: { nickname: v.author, uid: '', follower_count: 0, signature: '' },
+          digg_count: v.likes,
+          create_time: '',
+          reply_count: 0,
+        });
+      }
+    } catch (e) {
+      log.warn({ err: e, aweme_id: v.aweme_id }, '拉评论失败，用视频描述 fallback');
+      comments.push({
+        cid: `${v.aweme_id}-desc-fallback`,
+        aweme_id: v.aweme_id,
+        video_url: v.url,
+        video_desc: v.desc,
+        keyword: 'video_desc_fallback',
+        text: v.desc,
+        user: { nickname: v.author, uid: '', follower_count: 0, signature: '' },
+        digg_count: v.likes,
+        create_time: '',
+        reply_count: 0,
+      });
+    }
   }
   return { comments, videos: videos.length };
 }
@@ -515,6 +712,44 @@ async function readFileFromPrompts(promptsDir: string, filename: string): Promis
 async function createCRM(profile: import('../core/types.js').BusinessProfile) {
   const { getCRM } = await import('../adapters/registry.js');
   return getCRM(profile.crm.type);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 0 PR 2（Task 2.2）：notifier 告警 helper
+// ---------------------------------------------------------------------------
+
+/**
+ * 加载业务 profile 并解析 notifier 列表。
+ * profile 加载失败时返回 []，告警降级为静默（不阻塞主流程）。
+ * 测试可通过 opts.injectNotifiers / opts.injectResolveNotifiers 覆盖。
+ */
+async function loadAndResolveNotifiers(opts: RunDailyOptions): Promise<Notifier[]> {
+  try {
+    const loaded = await loadBusinessProfile(opts.businessDir);
+    return (opts.injectResolveNotifiers ?? defaultResolveNotifiers)(loaded.profile);
+  } catch (e) {
+    log.warn({ err: e instanceof Error ? e.message : String(e) }, '加载 profile 失败，告警跳过');
+    return [];
+  }
+}
+
+/**
+ * 发送 notifier 消息，10s 超时（Promise.race），不抛异常到外层。
+ * 关键：finally 块调用时绝不能让 notifier 失败/超时 throw 到外层。
+ */
+async function sendWithTimeout(n: Notifier, message: Parameters<Notifier['send']>[0]): Promise<void> {
+  try {
+    await Promise.race([
+      n.send(message),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('notifier.send timeout')), 10_000)),
+    ]);
+  } catch (e) {
+    log.error(
+      { notifier: n.name, err: e instanceof Error ? e.message : String(e) },
+      'notifier.send 失败/超时',
+    );
+    // 绝不抛出 —— caller 可能在 finally 块，throw 会破坏 finally 语义
+  }
 }
 
 // ---------------------------------------------------------------------------

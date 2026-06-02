@@ -53,6 +53,14 @@ export interface BusinessProfile {
     };
   };
 
+  observability?: {
+    run_history?: { enabled?: boolean };          // 默认 true
+    notifier?: {
+      enabled?: boolean;                          // 默认 true
+      channels?: string[];                        // 默认 ['console']
+    };
+  };
+
   prompts_dir?: string;      // 默认 business/prompts/
   knowledge_dir?: string;    // 默认 business/knowledge/
 }

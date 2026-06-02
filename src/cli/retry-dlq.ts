@@ -110,4 +110,4 @@ export async function runCLI(args: string[]): Promise<void> {
   await runRetryDlq(args);
 }
 
-selfInvoke(runCLI);
+selfInvoke(import.meta.url, runCLI);

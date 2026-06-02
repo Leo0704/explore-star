@@ -215,6 +215,30 @@ describe('businessProfileSchema', () => {
     });
     expect(r.success).toBe(false);
   });
+
+  it('accepts observability with default values', () => {
+    const r = businessProfileSchema.safeParse({
+      ...VALID_PROFILE,
+      observability: { run_history: { enabled: true }, notifier: { enabled: true, channels: ['console'] } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects observability.run_history.enabled !== boolean', () => {
+    const r = businessProfileSchema.safeParse({
+      ...VALID_PROFILE,
+      observability: { run_history: { enabled: 'yes' as any } },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects observability.notifier.channels with non-string entries', () => {
+    const r = businessProfileSchema.safeParse({
+      ...VALID_PROFILE,
+      observability: { notifier: { channels: [123 as any] } },
+    });
+    expect(r.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

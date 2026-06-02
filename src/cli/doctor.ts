@@ -131,4 +131,4 @@ export async function runCLI(args: string[]): Promise<void> {
   await runDoctor(args);
 }
 
-selfInvoke(runCLI);
+selfInvoke(import.meta.url, runCLI);

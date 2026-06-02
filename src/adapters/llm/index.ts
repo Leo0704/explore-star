@@ -39,5 +39,15 @@ export function registerAll(): void {
     process.env.OLLAMA_MODEL || 'qwen2.5',
   ));
 
+  // 自定义 OpenAI 兼容 API（如 mimo、vLLM、LiteLLM 等）
+  if (process.env.CUSTOM_API_KEY) {
+    registerLLM('custom', new OpenAICompatibleLLM({
+      apiKey: process.env.CUSTOM_API_KEY,
+      baseUrl: process.env.CUSTOM_BASE_URL,
+      model: process.env.CUSTOM_MODEL || 'gpt-4o-mini',
+      displayName: process.env.CUSTOM_MODEL || 'custom',
+    }));
+  }
+
   log.info({ llms: listLLMs() }, '已注册 LLM');
 }

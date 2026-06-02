@@ -66,15 +66,23 @@ buying_stages:
     description: "明确要做、问报价、问工期、预算已就绪"
 
 llm:
-  provider: deepseek
-  model: deepseek-v3
-  api_key_env: DEEPSEEK_API_KEY
+  provider: custom
+  model: mimo-v2.5-pro
+  api_key_env: CUSTOM_API_KEY
+  base_url: "https://token-plan-sgp.xiaomimimo.com/v1"
   temperature: 0.3
   max_tokens: 1000
-  # 降级链（主 provider 失败时按顺序尝试）
-  fallback:
-    - provider: openai
-      model: gpt-4o-mini
+
+# Q1 切换：embedding 改用国产通义千问（阿里云百炼）
+# 申请 API Key：https://bailian.console.aliyun.com/
+# 设置环境变量：export DASHSCOPE_API_KEY=sk-xxxxxxxx
+# 跟 src/adapters/embeddings/qwen.ts + src/rag/index-builder.ts:65 保持一致
+# （schema 用 float[1024] 对应 text-embedding-v3 默认维度）
+embedding:
+  provider: qwen
+  model: text-embedding-v3
+  api_key_env: DASHSCOPE_API_KEY
+  dimensions: 1024
 
 crm:
   type: feishu
@@ -101,3 +109,10 @@ feedback_config:
     hook_style: false          # 钩子风格必须手动确认
     persona_value: false       # persona 价值必须手动确认
     interaction_time: false    # 互动时段必须手动确认
+
+  observability:
+    run_history:
+      enabled: true
+    notifier:
+      enabled: true
+      channels: ['console']

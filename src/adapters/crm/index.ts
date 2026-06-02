@@ -15,9 +15,29 @@ export function registerAll(): void {
   registerCRM('csv', new CsvCRM('./data/leads.csv'));
 
   // 飞书：仅在环境变量存在时注册
-  if (process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET) {
-    // 注意：业务方应在 business/crm.yaml 配置具体 table_id + field_mapping
-    // V1.4: 这里不直接注册实例，由 run-daily.ts 按 crm.yaml 动态创建
+  if (process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.FEISHU_APP_TOKEN && process.env.FEISHU_TABLE_ID) {
+    registerCRM('feishu', new FeishuCRM({
+      appToken: process.env.FEISHU_APP_TOKEN,
+      tableId: process.env.FEISHU_TABLE_ID,
+      appIdEnv: 'FEISHU_APP_ID',
+      appSecretEnv: 'FEISHU_APP_SECRET',
+      fieldMapping: {
+        cid: 'cid',
+        nickname: '抖音昵称',
+        comment_text: '评论原文',
+        video_url: '视频链接',
+        video_desc: '视频标题',
+        keyword: '来源关键词',
+        pain_point: '痛点',
+        persona: '人设',
+        intent_score: '意向分',
+        buying_stage: '购买阶段',
+        suggested_reply_hook: '钩子_评论用',
+        suggested_dm_hook: '钩子_私信用',
+        status: '状态',
+        created_at: '创建时间',
+      },
+    }));
   }
 
   // Notion

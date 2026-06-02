@@ -1,0 +1,30 @@
+# E2E 测试业务配置
+
+business:
+  name: "E2E测试业务"
+  value_prop: "测试全链路流水线"
+
+target_personas:
+  - id: test_persona
+    name: "测试人设"
+    typical_pain_points:
+      - "测试痛点A"
+      - "测试痛点B"
+
+intent_signals:
+  - "AI"
+  - "自动化"
+  - "测试"
+
+llm:
+  provider: custom
+  model: mimo-v2.5-pro
+  api_key_env: CUSTOM_API_KEY
+  base_url: "https://token-plan-sgp.xiaomimimo.com/v1"
+
+crm:
+  type: feishu
+  config:
+    app_id_env: FEISHU_APP_ID
+    app_secret_env: FEISHU_APP_SECRET
+    table_id_env: FEISHU_TABLE_ID

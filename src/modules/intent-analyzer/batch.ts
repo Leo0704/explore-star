@@ -94,8 +94,15 @@ export async function analyzeBatch(
   let llmErrors = 0;
   let rawOutput = '';
 
+  // §3.11 回路 2 引导：把反馈归因得出的"最优钩子风格"显式塞进 prompt
+  // 让 LLM 知道本批次优先用哪种风格生成 suggested_*_hook
+  // 兜底：如果 hookStyle 缺失（冷启动）就不注入
+  const hookStyleHint = ctx.hookStyle
+    ? `\n\n【钩子风格引导】本批次请使用「${ctx.hookStyle}」风格生成回复/私信钩子文案。`
+    : '';
+
   try {
-    rawOutput = await llm.complete(`${systemPrompt}\n\n${userPrompt}\n\n【输出 JSON 数组】`);
+    rawOutput = await llm.complete(`${systemPrompt}\n\n${userPrompt}${hookStyleHint}\n\n【输出 JSON 数组】`);
   } catch (e) {
     llmErrors++;
     return {
