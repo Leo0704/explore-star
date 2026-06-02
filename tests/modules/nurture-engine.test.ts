@@ -114,6 +114,50 @@ describe('引导引擎', () => {
       expect(tasks).toHaveLength(0);
     });
 
+    it('回复含中文拒绝词（别发了）→ opt_out=true + status=已流失', () => {
+      // F11 验证：applyInteractionFeedback 必须触发 checkAbandonment 中的 opt_out 分支
+      const lead = mkLead({
+        last_task_executed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+        last_task_result: '有回应',
+        execution_count: 1,
+        response_count: 1,
+        last_response_text: '别发了别再打扰我了',
+      });
+      const tasks = generateDailyTasks([lead], { profile, conversion });
+      expect(lead.opt_out).toBe(true);
+      expect(lead.status).toBe('已流失');
+      expect(tasks).toHaveLength(0);
+    });
+
+    it('回复含英文拒绝词（stop）→ status=已流失', () => {
+      // F11 验证：英文拒绝词同样触发
+      const lead = mkLead({
+        last_task_executed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+        last_task_result: '有回应',
+        execution_count: 1,
+        response_count: 1,
+        last_response_text: 'stop please',
+      });
+      const tasks = generateDailyTasks([lead], { profile, conversion });
+      expect(lead.opt_out).toBe(true);
+      expect(lead.status).toBe('已流失');
+      expect(tasks).toHaveLength(0);
+    });
+
+    it('正常回复（无拒绝词）→ opt_out 保持 false', () => {
+      // F11 验证：良性回复不会被误判
+      const lead = mkLead({
+        last_task_executed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+        last_task_result: '有回应',
+        execution_count: 1,
+        response_count: 1,
+        last_response_text: '好的谢谢，我考虑一下',
+      });
+      generateDailyTasks([lead], { profile, conversion });
+      expect(lead.opt_out).toBeFalsy();
+      expect(lead.status).not.toBe('已流失');
+    });
+
     it('任务间隔 < 24h → 跳过', () => {
       const lead = mkLead({
         last_task_executed_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),  // 1h 前

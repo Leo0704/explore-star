@@ -9,6 +9,7 @@
  */
 
 import type { Lead, LeadStatus, Task, TaskAction, BusinessProfile, ConversionConfig } from '../../core/types.js';
+import { checkAbandonment, checkOptOut } from './smart-abandon.js';
 
 export interface NurtureEngineOptions {
   profile: BusinessProfile;
@@ -53,11 +54,11 @@ export function generateDailyTasks(
   for (const lead of sortedLeads) {
     if (tasks.length >= limit) break;
 
-    // 1. 检查互动感知（§3.6.2）
-    applyInteractionFeedback(lead, noRespLimit);
+    // 1. 检查互动感知（§3.6.2）— 委托给 checkAbandonment（§3.6.3）覆盖 opt_out + 被拒 + 0 回应
+    applyInteractionFeedback(lead, noRespLimit, dormantDays);
 
-    // 2. 检查智能放弃（§3.6.3）
-    applyAbandonmentLogic(lead, noRespLimit, dormantDays);
+    // 2. 检查智能放弃（§3.6.3）— 仅做沉默/60 天归档（opt_out + 0 回应已在上面处理）
+    applyAbandonmentLogic(lead, dormantDays);
 
     // 3. 跳过终态
     if (['已成交', '已流失'].includes(lead.status)) continue;
@@ -80,34 +81,27 @@ export function generateDailyTasks(
 // §3.6.2 互动效果感知
 // ---------------------------------------------------------------------------
 
-function applyInteractionFeedback(lead: Lead, noRespLimit: number): void {
-  // 已在 lead.status_history 里记录了上次执行结果
-  // 这里只处理"被拒"和"3 次 0 回应 → 降级"
-  if (lead.last_task_result === '被拒') {
-    markStatus(lead, '已流失', '客户明确拒绝');
-    return;
-  }
-  if (lead.last_task_result === '无回应' && lead.execution_count >= noRespLimit && lead.response_count === 0) {
-    markStatus(lead, '已流失', `执行 ${lead.execution_count} 次 0 回应`);
-    return;
+function applyInteractionFeedback(lead: Lead, noRespLimit: number, dormantDays: number): void {
+  // F11 修复：委托给 checkAbandonment 统一处理 opt_out / 被拒 / 0 回应
+  const result = checkAbandonment(lead, noRespLimit, dormantDays);
+  if (!result.shouldAbandon || !result.newStatus) return;
+
+  if (result.newStatus === '已流失') {
+    // 命中拒绝词（opt_out 信号）→ 同时打 opt_out=true
+    if (checkOptOut(lead.last_response_text)) {
+      lead.opt_out = true;
+    }
+    markStatus(lead, '已流失', result.reason);
+  } else if (result.newStatus === '沉默') {
+    markStatus(lead, '沉默', result.reason);
   }
 }
 
 // ---------------------------------------------------------------------------
-// §3.6.3 智能放弃判定
+// §3.6.3 智能放弃判定（仅沉默 + 60 天归档；opt_out / 被拒 / 0 回应已在 §3.6.2 处理）
 // ---------------------------------------------------------------------------
 
-function applyAbandonmentLogic(lead: Lead, noRespLimit: number, dormantDays: number): void {
-  // 显式拒绝
-  if (lead.last_task_result === '被拒') {
-    markStatus(lead, '已流失', '客户显式拒绝');
-    return;
-  }
-  // 0 回应
-  if (lead.execution_count >= noRespLimit && lead.response_count === 0 && lead.status !== '已流失') {
-    markStatus(lead, '已流失', '0 回应');
-    return;
-  }
+function applyAbandonmentLogic(lead: Lead, dormantDays: number): void {
   // 沉默
   const lastInt = lead.last_interaction_at || lead.wechat_added_at || lead.created_at;
   const daysSince = (Date.now() - new Date(lastInt).getTime()) / (1000 * 60 * 60 * 24);
