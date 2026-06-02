@@ -1,9 +1,11 @@
 /**
- * 编排器测试
+ * 编排器测试 —— health-check 覆盖
+ *
+ * 注：state 和 run-daily 的测试已移至 orchestration/state.test.ts 和 orchestration/run-daily.test.ts
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { HealthCheckResult, HealthStatus, PipelineState } from '../src/orchestration/health-check.js';
+import { describe, it, expect } from 'vitest';
+import type { HealthCheckResult, HealthStatus } from '../src/orchestration/health-check.js';
 
 const VALID_STATUSES: HealthStatus[] = ['ok', 'warning', 'critical', 'error'];
 
@@ -66,135 +68,6 @@ describe('Orchestration', () => {
       expect(names).toEqual(expect.arrayContaining(['llm', 'crm', 'channel', 'notifier']));
       // summary 应是 "Adapter 检查：<ok>/<total> 通过"
       expect(result.summary).toMatch(/Adapter 检查：\s*\d+\/\d+\s*通过/);
-    });
-  });
-
-  describe('state', () => {
-    it('resetForNewDay 应返回 date=今天 + 7 个 step + completed=false', async () => {
-      const { resetForNewDay } = await import('../src/orchestration/state.js');
-
-      const state = await resetForNewDay();
-
-      // date 形如 YYYY-MM-DD == 今天
-      const today = new Date().toISOString().slice(0, 10);
-      expect(state.date).toBe(today);
-      // 必有 7 个 step
-      expect(state.steps).toHaveLength(7);
-      // 当前 step 0
-      expect(state.currentStep).toBe(0);
-      // 7 个 step name 必为已知值
-      const expectedNames = [
-        'reconnaissance', 'analysis', 'sync', 'task_generation',
-        'execution', 'notification', 'health_check',
-      ];
-      expect(state.steps.map(s => s.name)).toEqual(expectedNames);
-      // 所有 step 应为 pending
-      for (const s of state.steps) {
-        expect(s.status).toBe('pending');
-      }
-      // 全部完成标记为 false
-      expect(state.completed).toBe(false);
-    });
-
-    it('loadState 应返回与 resetForNewDay 形状一致的对象', async () => {
-      const { loadState, resetForNewDay } = await import('../src/orchestration/state.js');
-
-      await resetForNewDay();
-      const state = await loadState();
-
-      expect(state.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(state.steps).toHaveLength(7);
-      expect(state).toHaveProperty('startedAt');
-      expect(state).toHaveProperty('lastUpdatedAt');
-      expect(state).toHaveProperty('errors');
-      expect(Array.isArray(state.errors)).toBe(true);
-    });
-
-    it('updateStep 应把指定 step 改为给定状态并 currentStep 推进', async () => {
-      const { updateStep, resetForNewDay } = await import('../src/orchestration/state.js');
-
-      await resetForNewDay();
-      const state = await updateStep(0, 'completed', { test: true });
-
-      // 第 0 个 step 应为 completed
-      expect(state.steps[0].status).toBe('completed');
-      // currentStep 应推进到 1
-      expect(state.currentStep).toBe(1);
-      // result 应被写入
-      expect(state.steps[0].result).toEqual({ test: true });
-      // completedAt 应被写入
-      expect(typeof state.steps[0].completedAt).toBe('string');
-      // 其它 step 仍为 pending
-      for (let i = 1; i < state.steps.length; i++) {
-        expect(state.steps[i].status).toBe('pending');
-      }
-    });
-
-    it('persist state atomically via tmp+rename', async () => {
-      const { saveState, loadState, resetForNewDay } = await import('../src/orchestration/state.js');
-      const { rm, writeFile } = await import('node:fs/promises');
-      const { existsSync } = await import('node:fs');
-
-      // isolate to a temp state file
-      const origFile = './data/state.json';
-      const bakFile = './data/state.json.bak.atomic-test';
-      if (existsSync(origFile)) {
-        const { copyFile } = await import('node:fs/promises');
-        await copyFile(origFile, bakFile);
-      }
-
-      try {
-        await resetForNewDay();
-        const before = await loadState();
-        before.steps[0].status = 'completed';
-        before.steps[0].result = { atomic: true };
-        await saveState(before);
-
-        // confirm final file is valid JSON and matches what was written
-        const after = await loadState();
-        expect(after.steps[0].status).toBe('completed');
-        expect(after.steps[0].result).toEqual({ atomic: true });
-        // 原子写不应残留 .tmp.<pid> 文件
-        const { readdirSync } = await import('node:fs');
-        const tmpFiles = readdirSync('./data').filter(f => f.includes('.tmp.'));
-        expect(tmpFiles).toEqual([]);
-      } finally {
-        // restore original state
-        try {
-          const { cp } = await import('node:fs/promises');
-          if (existsSync(bakFile)) {
-            await cp(bakFile, origFile);
-            await rm(bakFile);
-          } else if (existsSync(origFile)) {
-            await rm(origFile);
-          }
-        } catch { /* best-effort */ }
-      }
-    });
-  });
-
-  describe('run-daily', () => {
-    it('dry-run 模式应 resolve 且不抛错', async () => {
-      const { runDaily } = await import('../src/orchestration/run-daily.js');
-
-      // 注入 mock channel：R1 assertLoggedIn 不会因测试环境未登录而抛 LoginRequiredError
-      const mockChannel = {
-        name: 'mock',
-        rateLimits: { search_per_hour: 0, user_videos_per_hour: 0, comment_per_hour: 0, friend_request_per_day: 0, dm_per_day: 0 },
-        async ping() { return { ok: true, loggedIn: true }; },
-        async search() { return []; },
-        async getUserVideos() { return []; },
-      };
-
-      // dry-run 不写真实数据
-      const result = await runDaily({
-        businessDir: './business.example/燃点-FDE',
-        dryRun: true,
-        injectChannel: mockChannel as any,
-      });
-
-      // 至少返回可识别的对象
-      expect(result).toBeDefined();
     });
   });
 });
