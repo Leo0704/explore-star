@@ -8,7 +8,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Task, TaskAction, TaskResult, Lead } from '../../core/types.js';
+import type { Task, TaskAction, TaskResult, Lead, CRMAdapter, LeadStatus } from '../../core/types.js';
 import { recordTaskExecuted } from '../feedback-analyzer/event-recorder.js';
 
 // ---------------------------------------------------------------------------
@@ -206,6 +206,8 @@ export interface BrowserExecuteOptions {
   headless?: boolean;
   /** 注入 fake browser 用于单测（不允许用于生产） */
   __fakeBrowser?: import('puppeteer-core').Browser;
+  /** CRM adapter：executeTasks 末尾按 action 推进 lead.status（Finding 2） */
+  crm?: CRMAdapter;
 }
 
 /**
@@ -380,6 +382,19 @@ export async function executeTasks(
       interaction_time: new Date().toISOString(),
     }).catch(() => {});
 
+    // 8.5 CRM 回写（Finding 2）：按 next_action 推进 lead.status
+    // 失败 best-effort，不中断主流程
+    if (opts.crm && result.result !== 'skipped') {
+      const newState = nextStateForAction(taskToExecute.next_action, taskToExecute.current_state);
+      if (newState) {
+        try {
+          await opts.crm.updateStatus(taskToExecute.lead_cid, newState, `执行 ${taskToExecute.next_action} 成功`);
+        } catch (e) {
+          console.warn(`[task-executor] CRM 回写失败（lead_cid=${taskToExecute.lead_cid}）：${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+
     // 9. 风控信号检测
     if (result.risk_signal) {
       if (result.risk_signal.action === 'emergency_stop') {
@@ -392,6 +407,34 @@ export async function executeTasks(
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Finding 2：根据 next_action 推断新状态（CRM 回写用）
+// ---------------------------------------------------------------------------
+
+const ACTION_TO_NEW_STATE: Partial<Record<TaskAction, LeadStatus>> = {
+  like_and_follow: '已关注',
+  comment_reply: '已互动',
+  friend_request: '已加好友',
+  dm: '已私信',
+  send_material: '已加微',
+};
+
+/**
+ * 根据 next_action 推断应推进到的新状态。
+ * 优先按"动作 → 新状态"映射（覆盖大部分场景）；若 current_state 已超过目标，
+ * 则保持 current_state（避免倒推）。
+ */
+function nextStateForAction(action: TaskAction, currentState: LeadStatus): LeadStatus | null {
+  const candidate = ACTION_TO_NEW_STATE[action];
+  if (!candidate) return null;
+  // 若已有状态比 candidate 更靠后（如 "已加微"），不倒推
+  const order: LeadStatus[] = ['新发现', '已关注', '已互动', '已加好友', '已私信', '已加微', '已预约', '已成交'];
+  const currentIdx = order.indexOf(currentState);
+  const candidateIdx = order.indexOf(candidate);
+  if (currentIdx >= 0 && candidateIdx >= 0 && currentIdx > candidateIdx) return null;
+  return candidate;
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { writeFile, unlink, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Task, SafetyConfig } from '../../src/core/types.js';
+import type { Task, SafetyConfig, CRMAdapter, LeadStatus } from '../../src/core/types.js';
 
 // 直接导入（不需要 mock）
 import { createRateLimiter, isEmergencyStop, reviewHook } from '../../src/modules/task-executor/index.js';
@@ -232,6 +232,23 @@ function makeFakeBrowser() {
 }
 
 /**
+ * 共享的 browser-actions mock —— 给 executeTasks 9-阶段端到端 + Finding 2 测试复用
+ */
+const browserActionsMock = {
+  executeBrowserAction: vi.fn(async (task: Task) => ({
+    task_id: task.task_id,
+    lead_cid: task.lead_cid,
+    action: task.next_action,
+    result: 'executed_with_response' as const,
+    executed_at: new Date().toISOString(),
+  })),
+  likeAndFollow: vi.fn(async () => ({ ok: true })),
+  commentReply: vi.fn(async () => ({ ok: true })),
+  friendRequest: vi.fn(async () => ({ ok: true })),
+  sendDirectMessage: vi.fn(async () => ({ ok: true })),
+};
+
+/**
  * 给定 action 构造一个最小 task
  */
 function makeE2ETask(overrides: Partial<Task> = {}): Task {
@@ -254,20 +271,7 @@ function makeE2ETask(overrides: Partial<Task> = {}): Task {
 
 describe('executeTasks 9-阶段端到端', () => {
   // mock browser-actions（含 likeAndFollow 等所有动作的占位实现）
-  const browserActionsMock = {
-    executeBrowserAction: vi.fn(async (task: Task) => ({
-      task_id: task.task_id,
-      lead_cid: task.lead_cid,
-      action: task.next_action,
-      result: 'executed_with_response' as const,
-      executed_at: new Date().toISOString(),
-    })),
-    likeAndFollow: vi.fn(async () => ({ ok: true })),
-    commentReply: vi.fn(async () => ({ ok: true })),
-    friendRequest: vi.fn(async () => ({ ok: true })),
-    sendDirectMessage: vi.fn(async () => ({ ok: true })),
-  };
-
+  // 提到模块顶层供 Finding 2 测试块复用
   beforeEach(() => {
     vi.resetModules();
     vi.doMock('../../src/modules/task-executor/browser-actions.js', () => browserActionsMock);
@@ -460,5 +464,165 @@ describe('executeTasks 9-阶段端到端', () => {
     // 3. 观察者 limiter 计数应仍为 0（executeTasks 内部 limiter 也未增）
     expect(observer.getCounters().dm_today).toBe(0);
     expect(observer.getCounters().friend_requests_today).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finding 2: executeTasks 末尾按 action 回写 CRM
+//
+// 验证：
+//   (F2-1) crm.updateStatus 被调用 1 次/task，传入 (cid, newState)，
+//          newState 从 STATE_TRANSITIONS[task.next_action].new_state 推断
+//   (F2-2) 多个 task 时，crm.updateStatus 被调对应次数
+//   (F2-3) crm.updateStatus 抛错时主流程不中断（results 仍有 1 个，task 仍执行）
+// ---------------------------------------------------------------------------
+
+/** 构造一个 spy CRM：updateStatus 调一次记一次 */
+function makeSpyCRM(overrides: Partial<CRMAdapter> = {}): CRMAdapter {
+  return {
+    syncLeads: vi.fn().mockResolvedValue({ synced: 0, failed: 0, errors: [] }),
+    getLead: vi.fn().mockResolvedValue(null),
+    updateStatus: vi.fn().mockResolvedValue(undefined),
+    listLeads: vi.fn().mockResolvedValue([]),
+    ping: vi.fn().mockResolvedValue(true),
+    ...overrides,
+  };
+}
+
+describe('Finding 2: executeTasks 回写 CRM', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('../../src/modules/task-executor/browser-actions.js', () => browserActionsMock);
+    browserActionsMock.executeBrowserAction.mockClear();
+    browserActionsMock.likeAndFollow.mockClear();
+    browserActionsMock.commentReply.mockClear();
+    browserActionsMock.friendRequest.mockClear();
+    browserActionsMock.sendDirectMessage.mockClear();
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../../src/modules/task-executor/browser-actions.js');
+    vi.doUnmock('../../src/modules/task-executor/hook-review.js');
+    vi.resetModules();
+  });
+
+  it('(F2-1) 1 个 task 成功执行后，crm.updateStatus 被调 1 次，newState 来自 STATE_TRANSITIONS', async () => {
+    vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
+      reviewHook: vi.fn().mockResolvedValue({ approved: true }),
+      needsReview: vi.fn().mockReturnValue(false),
+      FeishuReviewClient: vi.fn(),
+    }));
+
+    const { executeTasks } = await import('../../src/modules/task-executor/index.js');
+    const crm = makeSpyCRM();
+
+    const config: SafetyConfig = {
+      rate_limits: {
+        douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
+        min_interval_seconds: 0,
+        max_interval_seconds: 0,
+      },
+      daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
+      emergency_stop: 'config/EMERGENCY_STOP',
+      fatal_signals: [],
+      hook_review: false,
+    };
+
+    // next_action = like_and_follow → STATE_TRANSITIONS['新发现'].new_state = '已关注'
+    const task = makeE2ETask({
+      task_id: 'tF2_1',
+      lead_cid: 'cid_F2_1',
+      current_state: '新发现',
+      next_action: 'like_and_follow',
+    });
+
+    await executeTasks([task], config, { crm });
+
+    expect(crm.updateStatus).toHaveBeenCalledTimes(1);
+    expect(crm.updateStatus).toHaveBeenCalledWith('cid_F2_1', '已关注', expect.any(String));
+  });
+
+  it('(F2-2) 3 个不同 action 的 task，crm.updateStatus 收到对应的新状态', async () => {
+    vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
+      reviewHook: vi.fn().mockResolvedValue({ approved: true }),
+      needsReview: vi.fn().mockReturnValue(false),
+      FeishuReviewClient: vi.fn(),
+    }));
+
+    const { executeTasks } = await import('../../src/modules/task-executor/index.js');
+    const crm = makeSpyCRM();
+
+    const config: SafetyConfig = {
+      rate_limits: {
+        douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
+        min_interval_seconds: 0,
+        max_interval_seconds: 0,
+      },
+      daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
+      emergency_stop: 'config/EMERGENCY_STOP',
+      fatal_signals: [],
+      hook_review: false,
+    };
+
+    // STATE_TRANSITIONS 映射：
+    //   新发现 + like_and_follow  → 已关注
+    //   已关注 + comment_reply    → 已互动
+    //   已互动 + friend_request   → 已加好友
+    const tasks: Task[] = [
+      makeE2ETask({ task_id: 'tF2_2a', lead_cid: 'cid_a', current_state: '新发现', next_action: 'like_and_follow' }),
+      makeE2ETask({ task_id: 'tF2_2b', lead_cid: 'cid_b', current_state: '已关注', next_action: 'comment_reply' }),
+      makeE2ETask({ task_id: 'tF2_2c', lead_cid: 'cid_c', current_state: '已互动', next_action: 'friend_request', user_sec_uid: 'sec_c' }),
+    ];
+
+    await executeTasks(tasks, config, { crm });
+
+    expect(crm.updateStatus).toHaveBeenCalledTimes(3);
+    const calls = (crm.updateStatus as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0]).toEqual(['cid_a', '已关注', expect.any(String)]);
+    expect(calls[1]).toEqual(['cid_b', '已互动', expect.any(String)]);
+    expect(calls[2]).toEqual(['cid_c', '已加好友', expect.any(String)]);
+  });
+
+  it('(F2-3) crm.updateStatus 抛错时主流程不中断，results 仍正常返回', async () => {
+    vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
+      reviewHook: vi.fn().mockResolvedValue({ approved: true }),
+      needsReview: vi.fn().mockReturnValue(false),
+      FeishuReviewClient: vi.fn(),
+    }));
+
+    const { executeTasks } = await import('../../src/modules/task-executor/index.js');
+    const crm = makeSpyCRM({
+      updateStatus: vi.fn().mockRejectedValue(new Error('CRM down')),
+    });
+
+    const config: SafetyConfig = {
+      rate_limits: {
+        douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
+        min_interval_seconds: 0,
+        max_interval_seconds: 0,
+      },
+      daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
+      emergency_stop: 'config/EMERGENCY_STOP',
+      fatal_signals: [],
+      hook_review: false,
+    };
+
+    const task = makeE2ETask({
+      task_id: 'tF2_3',
+      lead_cid: 'cid_F2_3',
+      current_state: '新发现',
+      next_action: 'like_and_follow',
+    });
+
+    // 不应抛错
+    const results = await executeTasks([task], config, { crm });
+
+    // 浏览器动作仍执行
+    expect(browserActionsMock.executeBrowserAction).toHaveBeenCalledTimes(1);
+    // updateStatus 被尝试调用
+    expect(crm.updateStatus).toHaveBeenCalledTimes(1);
+    // results 仍包含该 task 的执行结果（不被中断）
+    expect(results).toHaveLength(1);
+    expect(results[0].result).toBe('executed_with_response');
   });
 });
