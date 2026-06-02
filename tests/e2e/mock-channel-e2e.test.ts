@@ -17,12 +17,14 @@ import { registerMockChannel } from '../../src/adapters/channel/mock.js';
 import type { ChannelAdapter } from '../../src/core/types.js';
 
 describe('MOCK_CHANNEL e2e：run-daily 不依赖真 Chrome 跑通', () => {
-  beforeEach(() => {
-    vi.resetModules();
+  beforeEach(async () => {
+    // 先注册所有内置 adapter（业务配置依赖 LLM/Notifier/CRM/Embedding）
+    const { registerBuiltins } = await import('../../src/adapters/registry.js');
+    await registerBuiltins();
+    await registerMockChannel();
   });
 
   it('注入 mock channel 后 runDaily dry-run 跑通', async () => {
-    await registerMockChannel();
     const { getChannel } = await import('../../src/adapters/registry.js');
     const mockChannel = getChannel('mock') as ChannelAdapter;
 
