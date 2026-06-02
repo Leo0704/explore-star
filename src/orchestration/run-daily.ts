@@ -307,7 +307,7 @@ async function runDailyBody(
 
       // Phase 2 #4:cost 埋点 —— 用 CostTracker 包装 LLM,累加 token/cost
       // cache 命中时 fetcher 不被调 → costTracker 自动不算 token（见 batch.ts: fetcher 闭包）
-      const costTracker = new CostTracker(llm as Parameters<typeof CostTracker>[0], profile.llm.provider);
+      const costTracker = new CostTracker(llm as ConstructorParameters<typeof CostTracker>[0], profile.llm.provider);
 
       // §3.11 回路 2：注入当前最优钩子风格（写到 lead.hook_style）
       // 优先级：weekly-insights.json（≥3 次测试的最优风格） > profile.hook_config.style > '像朋友推荐，不像销售'
