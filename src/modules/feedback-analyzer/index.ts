@@ -158,12 +158,18 @@ async function applyKeywordWeights(
 
     if (!config?.search?.keywords) return;
 
+    const wMin = config.search.weight_min ?? 0.2;
+    const wMax = config.search.weight_max ?? 3.0;
+
     let changed = false;
     for (const kw of performance) {
       if (!kw.auto_apply || kw.suggested_weight == null) continue;
       const current = config.search.keywords[kw.keyword]?.weight;
-      if (current != null && Math.abs(current - kw.suggested_weight) > 0.01) {
-        config.search.keywords[kw.keyword].weight = kw.suggested_weight;
+      if (current == null) continue;
+      // clamp 到 [weight_min, weight_max] 防震荡
+      const clamped = Math.max(wMin, Math.min(wMax, kw.suggested_weight));
+      if (Math.abs(current - clamped) > 0.01) {
+        config.search.keywords[kw.keyword].weight = Math.round(clamped * 100) / 100;
         changed = true;
       }
     }

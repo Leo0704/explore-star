@@ -39,7 +39,7 @@ export interface ConversionEngine {
   generateDailyReport(date: string): Promise<ConversionReport>;
   findDormantLeads(): Promise<Lead[]>;
   reactivateLead(cid: string): Promise<{ success: boolean; reason: string }>;
-  recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string }): Promise<void>;
+  recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string; persona?: string }): Promise<void>;
 }
 
 /**
@@ -74,7 +74,7 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
       return { success: result.success, reason: result.reason };
     },
 
-    async recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string }): Promise<void> {
+    async recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string; persona?: string }): Promise<void> {
       await recordEvent({
         event: 'touchpoint_sent',
         cid,
@@ -83,7 +83,7 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
         keyword: _touchpoint.action_type,
         hook_style: _touchpoint.channel,
         hook_text: _touchpoint.content_summary,
-        persona: '',
+        persona: _touchpoint.persona ?? '',
         interaction_time: _touchpoint.sent_at,
       });
     },

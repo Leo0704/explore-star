@@ -29,8 +29,9 @@ export function computePersonaValue(events: LeadEvent[]): PersonaValueResult {
     byPersona[e.persona].leads.add(e.cid);
     if (e.to_status && CONVERTED_STATUSES.has(e.to_status as string)) {
       byPersona[e.persona].conversions++;
-      // V1.4: 估算 revenue（实际从 CRM 读）
-      byPersona[e.persona].revenue += 50_000;
+      // 从事件 metadata 读实际营收，无则为 0
+      const rev = (e.metadata?.revenue as number) ?? 0;
+      byPersona[e.persona].revenue += rev;
     }
   }
 

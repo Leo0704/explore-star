@@ -194,15 +194,18 @@ function pickBestTime(insights: WeeklyInsights | null | undefined, personaId: st
   if (!personaTime || personaTime.hours.length === 0) {
     return nextDefaultTime();
   }
-  // 取 sample 最大的时段（最可靠）
-  const best = personaTime.hours.reduce((a, b) => (b.sample > a.sample ? b : a));
+  // 取 sample 最大的 top-3 时段，随机选一个（分散同 persona 任务）
+  const topHours = [...personaTime.hours]
+    .sort((a, b) => b.sample - a.sample)
+    .slice(0, 3);
+  const picked = topHours[Math.floor(Math.random() * topHours.length)];
   // 找下一个匹配 weekday + hour 的时间点
   const now = new Date();
   for (let d = 0; d < 7; d++) {
     const candidate = new Date(now);
     candidate.setDate(candidate.getDate() + d);
-    if (candidate.getDay() !== best.weekday) continue;
-    candidate.setHours(best.hour, Math.floor(Math.random() * 30), 0, 0);
+    if (candidate.getDay() !== picked.weekday) continue;
+    candidate.setHours(picked.hour, Math.floor(Math.random() * 30), 0, 0);
     if (candidate.getTime() > now.getTime()) return candidate.toISOString();
   }
   return nextDefaultTime();
