@@ -109,3 +109,10 @@ feedback_config:
     hook_style: false          # 钩子风格必须手动确认
     persona_value: false       # persona 价值必须手动确认
     interaction_time: false    # 互动时段必须手动确认
+
+  observability:
+    run_history:
+      enabled: true
+    notifier:
+      enabled: true
+      channels: ['console']

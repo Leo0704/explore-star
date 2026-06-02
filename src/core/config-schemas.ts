@@ -115,6 +115,15 @@ export const businessProfileSchema = z.object({
       interaction_time: z.boolean().optional(),
     }).passthrough().optional(),
   }).passthrough().optional(),
+  observability: z.object({
+    run_history: z.object({
+      enabled: z.boolean().optional(),
+    }).passthrough().optional(),
+    notifier: z.object({
+      enabled: z.boolean().optional(),
+      channels: z.array(NonEmptyString).optional(),
+    }).passthrough().optional(),
+  }).passthrough().optional(),
   prompts_dir: z.string().optional(),
   knowledge_dir: z.string().optional(),
 }).passthrough();
