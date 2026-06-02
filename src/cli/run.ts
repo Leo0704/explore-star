@@ -6,6 +6,7 @@
  */
 
 import { runDaily } from '../orchestration/run-daily.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -28,10 +29,7 @@ export async function runRun(args: string[]): Promise<void> {
   const stepFlag = extractFlag(args, '--step');
   const dailyTaskLimit = parseInt(extractFlag(args, '--daily-task-limit') || '20');
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
+  if (showUsage(USAGE, args)) return;
 
   console.log(`[run] 启动主流程 | business=${businessDir} | dry-run=${dryRun}`);
 
@@ -46,15 +44,8 @@ export async function runRun(args: string[]): Promise<void> {
   console.log(`[run] 完成`);
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runRun(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

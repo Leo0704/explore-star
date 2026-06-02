@@ -10,7 +10,6 @@
  *   explore-star nurture                 —— 单跑引导引擎
  *   explore-star convert                 —— 单跑转化引擎
  *   explore-star insights                —— 跑反馈分析器
- *   explore-star conversion-report       —— 生成转化日报
  *   explore-star reactivate              —— 再激活沉默客户
  *   explore-star watch-bookings          —— 监听预约
  *   explore-star configure               —— 修改业务配置
@@ -25,9 +24,8 @@ const USAGE = `
   run                      跑每日主流程（需 --business=<dir>）
   analyze                  单跑意图分析
   nurture                  单跑引导引擎
-  convert                  单跑转化引擎（转化日报）
+  convert                  单跑转化引擎（转化日报，--verbose 详细输出）
   insights                 跑反馈分析器（生成 weekly-insights.json）
-  conversion-report        生成并推送转化日报
   reactivate               再激活沉默客户
   watch-bookings           启动预约监听循环
   configure                查看/修改业务配置
@@ -90,8 +88,9 @@ async function main() {
         break;
       }
       case 'conversion-report': {
-        const { runCLI } = await import('./conversion-report.js');
-        await runCLI(rest);
+        // 兼容旧命令：转发到 convert --verbose
+        const { runCLI } = await import('./convert.js');
+        await runCLI(['--verbose', ...rest]);
         break;
       }
       case 'reactivate': {

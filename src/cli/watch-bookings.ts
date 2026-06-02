@@ -8,6 +8,7 @@
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getCRM } from '../adapters/registry.js';
 import { watchBookings } from '../modules/conversion-engine/booking-listener.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -27,10 +28,7 @@ export async function runWatchBookings(args: string[]): Promise<void> {
   const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
   const pollInterval = parseInt(extractFlag(args, '--poll-interval') || '30000');
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
+  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 
@@ -48,15 +46,8 @@ export async function runWatchBookings(args: string[]): Promise<void> {
   await watchBookings({ crm, pollIntervalMs: pollInterval });
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runWatchBookings(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

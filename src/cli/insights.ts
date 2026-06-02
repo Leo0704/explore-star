@@ -8,6 +8,7 @@
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins } from '../adapters/registry.js';
 import { runWeeklyAnalysis } from '../modules/feedback-analyzer/index.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -26,10 +27,7 @@ export async function runInsights(args: string[]): Promise<void> {
   const outputPath = extractFlag(args, '--output') || './data/feedback/weekly-insights.json';
   const dryRun = args.includes('--dry-run');
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
+  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 
@@ -74,15 +72,8 @@ export async function runInsights(args: string[]): Promise<void> {
   }
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runInsights(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

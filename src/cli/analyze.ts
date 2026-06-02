@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getLLM } from '../adapters/registry.js';
 import { analyzeComments } from '../modules/intent-analyzer/index.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -30,8 +31,7 @@ export async function runAnalyze(args: string[]): Promise<void> {
   const threshold = parseFloat(extractFlag(args, '--threshold') || '0.7');
   const dryRun = args.includes('--dry-run');
 
-  if (args.includes('--help') || args.includes('-h') || !inputPath) {
-    console.log(USAGE);
+  if (showUsage(USAGE, args) || !inputPath) {
     if (!inputPath) console.error('\n错误：缺少 --input 参数');
     return;
   }
@@ -65,15 +65,8 @@ export async function runAnalyze(args: string[]): Promise<void> {
   }
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runAnalyze(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

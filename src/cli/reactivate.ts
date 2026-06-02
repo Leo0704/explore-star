@@ -8,6 +8,7 @@
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getCRM } from '../adapters/registry.js';
 import { reactivateLead as doReactivate, reactivateDormantPool, findDormantLeads } from '../modules/conversion-engine/index.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -25,10 +26,7 @@ export async function runReactivate(args: string[]): Promise<void> {
   const cid = extractFlag(args, '--cid');
   const dryRun = args.includes('--dry-run');
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
+  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 
@@ -83,15 +81,8 @@ export async function runReactivate(args: string[]): Promise<void> {
   }
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runReactivate(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

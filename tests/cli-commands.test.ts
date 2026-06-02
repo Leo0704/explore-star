@@ -145,13 +145,14 @@ describe('CLI Commands', () => {
     });
   });
 
-  describe('conversion-report', () => {
-    it('--help 应打印 USAGE（含 --business / --date）', async () => {
-      const { runCLI } = await import('../src/cli/conversion-report.js');
+  describe('convert', () => {
+    it('--help 应打印 USAGE（含 --business / --date / --verbose）', async () => {
+      const { runCLI } = await import('../src/cli/convert.js');
       await runCLI(['--help']);
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
       expect(combined).toMatch(/--business/);
       expect(combined).toMatch(/--date/);
+      expect(combined).toMatch(/--verbose/);
     });
   });
 
@@ -216,9 +217,8 @@ describe('CLI Index', () => {
   run                      跑每日主流程（需 --business=<dir>）
   analyze                  单跑意图分析
   nurture                  单跑引导引擎
-  convert                  单跑转化引擎（转化日报）
+  convert                  单跑转化引擎（转化日报，--verbose 详细输出）
   insights                 跑反馈分析器（生成 weekly-insights.json）
-  conversion-report        生成并推送转化日报
   reactivate               再激活沉默客户
   watch-bookings           启动预约监听循环
   configure                查看/修改业务配置

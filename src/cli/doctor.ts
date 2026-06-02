@@ -10,6 +10,7 @@ import { execSync } from 'node:child_process';
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, listLLMs, listCRMs, listEmbeddings } from '../adapters/registry.js';
 import { checkAll, formatHealthReport, type HealthCheckResult } from '../orchestration/health-check.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -122,15 +123,8 @@ export async function runDoctor(args: string[]): Promise<void> {
   if (fail > 0) process.exit(1);
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runDoctor(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);

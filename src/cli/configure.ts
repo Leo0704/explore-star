@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBusinessProfile } from '../core/business-profile.js';
+import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
@@ -32,10 +33,7 @@ export async function runConfigure(args: string[]): Promise<void> {
   const enableFeature = extractFlag(args, '--enable');
   const setKeyValue = extractFlag(args, '--set');
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
+  if (showUsage(USAGE, args)) return;
 
   if (!disableFeature && !enableFeature && !setKeyValue) {
     // 显示当前配置
@@ -120,15 +118,8 @@ export async function runConfigure(args: string[]): Promise<void> {
   console.log('建议手动编辑 profile.yaml 或使用其他工具修改配置');
 }
 
-function extractFlag(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
-}
-
 export async function runCLI(args: string[]): Promise<void> {
   await runConfigure(args);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  runCLI(process.argv.slice(2)).catch(e => { console.error(e); process.exit(1); });
-}
+selfInvoke(runCLI);
