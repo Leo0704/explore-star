@@ -1,0 +1,20 @@
+# E2E 测试转化配置
+
+lifecycle_states:
+  - id: discovered
+    name: "新发现"
+    is_terminal: false
+  - id: engaged
+    name: "已互动"
+    is_terminal: false
+  - id: closed
+    name: "已成交"
+    is_terminal: true
+  - id: lost
+    name: "已流失"
+    is_terminal: true
+
+success_states:
+  - "closed"
+
+cost_per_lead: 5

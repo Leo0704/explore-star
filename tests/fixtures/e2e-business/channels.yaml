@@ -1,0 +1,16 @@
+# E2E 测试渠道配置 — keyword 模式
+
+source:
+  mode: "keyword"
+
+search:
+  keywords:
+    "AI 自动化":
+      weight: 1.0
+  limit_per_keyword: 5
+
+comment_filters:
+  min_length: 4
+  exclude_emoji_only: true
+  exclude_punctuation_only: true
+  exclude_marketing: true

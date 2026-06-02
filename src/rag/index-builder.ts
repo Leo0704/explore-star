@@ -8,6 +8,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import Database from 'better-sqlite3';
+import { load as loadSqliteVec } from 'sqlite-vec';
 import type { EmbeddingProvider } from '../core/types.js';
 
 export interface IndexResult {
@@ -57,15 +58,17 @@ export async function buildKnowledgeIndex(
   // 建库 & 建表
   const db = new Database(dbPath);
   try {
-    // 启用 sqlite-vec 扩展
-    db.loadExtension('sqlite-vec');
+    // 启用 sqlite-vec 扩展（用包 helper 解析平台对应的 .dylib 绝对路径）
+    loadSqliteVec(db);
 
     // 创建 virtual table
+    // Q1 切换：维度 1536（OpenAI）→ 1024（通义 v3 默认）
+    // 跟 src/adapters/embeddings/qwen.ts 的 dimensions 字段保持一致
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vectors USING vec0(
         path TEXT PRIMARY KEY,
         content TEXT,
-        embedding BLOB
+        embedding float[1024]
       );
     `);
 

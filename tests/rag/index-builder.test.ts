@@ -16,14 +16,17 @@ import { buildKnowledgeIndex } from '../../src/rag/index-builder.js';
 import type { EmbeddingProvider } from '../../src/core/types.js';
 
 function makeMockProvider(): EmbeddingProvider {
+  // Q1 切换：mock 维度跟通义 v3 默认对齐（1024）
+  // 跟 src/rag/index-builder.ts:65 的 schema 保持一致
+  const DIM = 1024;
   const vec = (seed: number) => {
     const out: number[] = [];
-    for (let i = 0; i < 8; i++) out.push(Math.sin(seed + i));
+    for (let i = 0; i < DIM; i++) out.push(Math.sin(seed + i));
     return out;
   };
   let callCount = 0;
   return {
-    dimensions: 8,
+    dimensions: DIM,
     model: 'mock-embed',
     embed: vi.fn(async (text: string) => {
       callCount++;

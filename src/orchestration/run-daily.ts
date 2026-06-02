@@ -137,6 +137,22 @@ async function runDailyBody(
   // 3. 选数据源模式
   const mode = channels.source?.mode ?? 'sec_uid';
 
+  // 3.5 keyword/both 模式：用 LLM 从业务画像自动生成搜索关键词
+  if (mode === 'keyword' || mode === 'both') {
+    const llmForKw = opts.injectLLM
+      ? opts.injectLLM
+      : (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
+    const { generateSearchKeywords } = await import('../modules/keyword-generator.js');
+    const generated = await generateSearchKeywords(profile, llmForKw);
+    if (Object.keys(generated).length > 0) {
+      channels.search = {
+        ...channels.search,
+        keywords: { ...channels.search?.keywords, ...generated },
+      };
+      log.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
+    }
+  }
+
   let comments: Comment[] = [];
   let videosScanned = 0;
 
@@ -206,7 +222,8 @@ async function runDailyBody(
   if (leads.length > 0) {
     try {
       const { getEmbedding } = await import('../adapters/registry.js');
-      const embeddingProvider = getEmbedding('openai');
+      // 默认用国产通义（Q1 切换）；如果用户只配了 OPENAI_API_KEY 会在 getEmbedding 里 fail-loud 报错
+      const embeddingProvider = getEmbedding('qwen');
       const { generateHook } = await import('../rag/hook-generator.js');
 
       let ragSuccess = 0;
@@ -447,20 +464,58 @@ async function fetchViaKeyword(
     }
   }
 
+  // 搜到视频后，拉真实评论（不再是视频标题当评论）
+  const douyinChannel = channel as import('../adapters/channel/douyin.js').DouyinChannel;
+  let commentCount = 0;
+
   for (const v of videos) {
     if (!v.aweme_id) continue;
-    comments.push({
-      cid: `${v.aweme_id}-desc`,
-      aweme_id: v.aweme_id,
-      video_url: v.url,
-      video_desc: v.desc,
-      keyword: 'video_desc_only',
-      text: v.desc,
-      user: { nickname: v.author, uid: '', follower_count: 0, signature: '' },
-      digg_count: v.likes,
-      create_time: '',
-      reply_count: 0,
-    });
+    try {
+      const videoComments = await douyinChannel.getVideoComments(v.aweme_id, 10);
+      for (const c of videoComments) {
+        comments.push({
+          cid: `${v.aweme_id}-${c.nickname}-${commentCount++}`,
+          aweme_id: v.aweme_id,
+          video_url: v.url,
+          video_desc: v.desc,
+          keyword: v.desc?.slice(0, 20) ?? '',
+          text: c.text,
+          user: { nickname: c.nickname, uid: c.uid, follower_count: 0, signature: '' },
+          digg_count: c.digg_count,
+          create_time: '',
+          reply_count: 0,
+        });
+      }
+      // 如果该视频没有评论，用视频描述作为 fallback
+      if (videoComments.length === 0) {
+        comments.push({
+          cid: `${v.aweme_id}-desc`,
+          aweme_id: v.aweme_id,
+          video_url: v.url,
+          video_desc: v.desc,
+          keyword: 'video_desc_only',
+          text: v.desc,
+          user: { nickname: v.author, uid: '', follower_count: 0, signature: '' },
+          digg_count: v.likes,
+          create_time: '',
+          reply_count: 0,
+        });
+      }
+    } catch (e) {
+      log.warn({ err: e, aweme_id: v.aweme_id }, '拉评论失败，用视频描述 fallback');
+      comments.push({
+        cid: `${v.aweme_id}-desc-fallback`,
+        aweme_id: v.aweme_id,
+        video_url: v.url,
+        video_desc: v.desc,
+        keyword: 'video_desc_fallback',
+        text: v.desc,
+        user: { nickname: v.author, uid: '', follower_count: 0, signature: '' },
+        digg_count: v.likes,
+        create_time: '',
+        reply_count: 0,
+      });
+    }
   }
   return { comments, videos: videos.length };
 }

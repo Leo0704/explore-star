@@ -52,7 +52,7 @@ export class FeishuCRM implements CRMAdapter {
   async updateStatus(cid: string, status: LeadStatus, note?: string): Promise<void> {
     // V1.4 简化：仅更新 status 字段（不传其他字段）
     const token = await this.getToken();
-    const res = await fetch(`${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records`, {
+    const res = await fetch(`${this.tableBase}/records`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -104,7 +104,7 @@ export class FeishuCRM implements CRMAdapter {
 
     // 1. 先用 search API 查找现有记录
     const searchRes = await fetch(
-      `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records/search`,
+      `${this.tableBase}/records/search`,
       {
         method: 'POST',
         headers: {
@@ -133,7 +133,7 @@ export class FeishuCRM implements CRMAdapter {
     if (existing) {
       // 2a. 找到 → PATCH 更新
       const patchRes = await fetch(
-        `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records/${existing.record_id}`,
+        `${this.tableBase}/records/${existing.record_id}`,
         {
           method: 'PUT',
           headers: {
@@ -149,7 +149,7 @@ export class FeishuCRM implements CRMAdapter {
     } else {
       // 2b. 没找到 → POST 新增
       const postRes = await fetch(
-        `${this.config.baseUrl}/open-apis/bitable/v1/apps/${this.config.tableId}/records`,
+        `${this.tableBase}/records`,
         {
           method: 'POST',
           headers: {
@@ -176,7 +176,7 @@ export class FeishuCRM implements CRMAdapter {
       throw new Error(`缺少环境变量 ${this.config.appIdEnv} 或 ${this.config.appSecretEnv}`);
     }
 
-    const res = await fetch(`${this.config.baseUrl}/open-apis/auth/v3/tenant_access_token/internal`, {
+    const res = await fetch(`${this.feishuBase}/open-apis/auth/v3/tenant_access_token/internal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
@@ -195,6 +195,18 @@ export class FeishuCRM implements CRMAdapter {
   private fieldMap(stdField: string): string {
     return this.config.fieldMapping?.[stdField] ?? stdField;
   }
+
+  private get feishuBase(): string {
+    return this.config.baseUrl || 'https://open.feishu.cn';
+  }
+
+  private get appBase(): string {
+    return `${this.feishuBase}/open-apis/bitable/v1/apps/${this.config.appToken}`;
+  }
+
+  private get tableBase(): string {
+    return `${this.appBase}/tables/${this.config.tableId}`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +215,8 @@ export class FeishuCRM implements CRMAdapter {
 
 export interface CrmConfig {
   baseUrl?: string;           // 默认 https://open.feishu.cn
-  tableId: string;
+  appToken: string;           // 飞书多维表 app_token（URL 中 /base/ 后面那段）
+  tableId: string;            // 飞书多维表 table_id
   appIdEnv: string;           // 环境变量名
   appSecretEnv: string;       // 环境变量名
   fieldMapping: Record<string, string>;
