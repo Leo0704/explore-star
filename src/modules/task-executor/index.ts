@@ -9,6 +9,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Task, TaskAction, TaskResult, Lead } from '../../core/types.js';
+import { recordTaskExecuted } from '../feedback-analyzer/event-recorder.js';
 
 // ---------------------------------------------------------------------------
 // SafetyConfig（从 config/safety.json 读取）
@@ -369,6 +370,15 @@ export async function executeTasks(
     }
 
     results.push(result);
+
+    // F3: 接入事件记录器（fire-and-forget，错误吞掉避免影响主流程）
+    void recordTaskExecuted(taskToExecute.lead_cid, {
+      keyword: '',
+      hook_style: taskToExecute.hook_style,
+      hook_text: taskToExecute.hook,
+      persona: taskToExecute.persona,
+      interaction_time: new Date().toISOString(),
+    }).catch(() => {});
 
     // 9. 风控信号检测
     if (result.risk_signal) {

@@ -9,6 +9,7 @@
  */
 
 import type { Lead, LeadStatus, Task, TaskAction, BusinessProfile, ConversionConfig } from '../../core/types.js';
+import { recordStatusChange } from '../feedback-analyzer/event-recorder.js';
 
 export interface NurtureEngineOptions {
   profile: BusinessProfile;
@@ -201,6 +202,15 @@ function markStatus(lead: Lead, to: LeadStatus, note?: string): void {
   lead.status = to;
   lead.status_history.push({ from, to, at: new Date().toISOString(), note });
   lead.updated_at = new Date().toISOString();
+  // F3: 接入事件记录器（不阻塞状态机，错误吞掉避免影响主流程）
+  const metadata = {
+    keyword: lead.keyword ?? '',
+    hook_style: lead.hook_style ?? 'default',
+    hook_text: lead.suggested_dm_hook ?? lead.suggested_reply_hook ?? '',
+    persona: lead.persona,
+    interaction_time: lead.last_interaction_at ?? new Date().toISOString(),
+  };
+  void recordStatusChange(lead.cid, from, to, metadata).catch(() => {});
 }
 
 function getPersonaValue(profile: BusinessProfile, personaId: string): number {
