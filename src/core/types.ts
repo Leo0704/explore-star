@@ -333,7 +333,7 @@ export interface ConversionReport {
 // ============================================================================
 
 export interface LeadEvent {
-  event: 'lead_status_changed' | 'lead_created' | 'task_executed';
+  event: 'lead_status_changed' | 'lead_created' | 'task_executed' | 'touchpoint_sent' | 'touchpoint_replied';
   cid: string;
   from_status?: LeadStatus;
   to_status?: LeadStatus;
@@ -344,6 +344,10 @@ export interface LeadEvent {
   interaction_time: string;             // ISO 8601
   days_to_convert?: number;
   metadata?: Record<string, unknown>;
+  // Touchpoint-specific fields (F12: §3.10 触达方式归因回路)
+  touchpoint_type?: string;             // 触达类型，如 send_pdf / send_booking_link / send_followup / reactivate
+  touchpoint_channel?: string;          // 触达渠道，如 wechat / sms / console
+  touchpoint_result?: 'opened' | 'replied' | 'booked' | 'no_response';
 }
 
 export interface KeywordPerformance {

@@ -9,6 +9,7 @@
 
 import type { Lead, ConversionConfig, ConversionReport, BusinessProfile, CRMAdapter } from '../../core/types.js';
 import { getNotifier } from '../../adapters/registry.js';
+import { recordEvent } from '../feedback-analyzer/event-recorder.js';
 
 export interface MaterialPusherOptions {
   profile: BusinessProfile;
@@ -52,6 +53,20 @@ export async function pushMaterial(
     title: `给 ${lead.nickname} 推送物料`,
     body: message,
     level: 'info',
+  });
+
+  // 记录触达事件（F12：用于 §3.10 触达方式归因回路）
+  const action_type = `send_${asset?.type ?? 'asset'}`;
+  await recordEvent({
+    event: 'touchpoint_sent',
+    cid: lead.cid,
+    touchpoint_type: action_type,
+    touchpoint_channel: 'console',
+    keyword: action_type,
+    hook_style: 'console',
+    hook_text: `推送物料「${asset?.name ?? ''}」`,
+    persona: '',
+    interaction_time: new Date().toISOString(),
   });
 
   // 更新 lead 状态（物料推送后推进到"已预约"阶段）
