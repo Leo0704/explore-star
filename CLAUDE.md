@@ -63,3 +63,24 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## 5. CodeGraph（必须使用）
+
+项目已配置 CodeGraph（`.codegraph/`），提供 `codegraph_search`/`codegraph_callers`/`codegraph_trace`/`codegraph_impact` 等 MCP 工具。
+
+**以下场景必须先调 CodeGraph，禁止手动 grep/read 遍历：**
+
+| 场景 | 工具 | 说明 |
+|---|---|---|
+| **找函数/类/接口在哪** | `codegraph_search` | 搜名字，秒出文件+行号+签名 |
+| **查谁调用了 X** | `codegraph_callers` | 改函数前必须查，确认影响范围 |
+| **查 X 调用了谁** | `codegraph_callees` | 理解函数内部依赖 |
+| **追踪调用链 A→B** | `codegraph_trace` | 跨模块数据流追踪，如 `runDaily → executeTasks` |
+| **改接口前查影响** | `codegraph_impact` | 改 `Lead`/`Task` 等核心类型前必须查 |
+| **快速理解模块结构** | `codegraph_explore` | 按文件/符号批量读取上下文 |
+| **重构前定位相关文件** | `codegraph_files` | 比 glob 更快，含符号统计 |
+
+**不需要 CodeGraph 的场景：**
+- 逐行审查业务逻辑是否闭环（需要人读代码）
+- 修改单个文件内的局部代码
+- 写测试、写配置
