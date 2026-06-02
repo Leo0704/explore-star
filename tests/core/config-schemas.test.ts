@@ -13,6 +13,9 @@ import {
   safetyConfigSchema,
   businessProfileSchema,
   formatZodError,
+  RetryConfigSchema,
+  StructuredErrorSchema,
+  ChannelRateLimitsSchema,
 } from '../../src/core/config-schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -255,5 +258,83 @@ describe('formatZodError', () => {
       expect(msg).toContain('校验失败');
       expect(msg).toMatch(/个问题/);
     }
+  });
+});
+
+// ============================================================================
+// Phase 1 #2: retry_config / structured_error / channel_rate_limits
+// ============================================================================
+
+describe('RetryConfigSchema', () => {
+  it('accepts empty (all optional)', () => {
+    expect(RetryConfigSchema.safeParse({}).success).toBe(true);
+  });
+
+  it('accepts full config', () => {
+    const r = RetryConfigSchema.safeParse({
+      comment_level: { enabled: true, max_attempts: 2 },
+      lead_level: { enabled: true, max_attempts: 3, backoff_ms: [1000, 2000, 4000], classify_errors: true },
+      step_level: { enabled: true, max_browser_restarts: 1 },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects max_attempts < 1', () => {
+    const r = RetryConfigSchema.safeParse({ comment_level: { enabled: true, max_attempts: 0 } });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects max_browser_restarts > 3', () => {
+    const r = RetryConfigSchema.safeParse({ step_level: { max_browser_restarts: 5 } });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects negative backoff_ms', () => {
+    const r = RetryConfigSchema.safeParse({ lead_level: { backoff_ms: [-100, 2000, 4000] } });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('StructuredErrorSchema', () => {
+  it('accepts valid', () => {
+    const r = StructuredErrorSchema.safeParse({ phase: 'analysis', severity: 'partial', error: 'LLM failed', count: 3 });
+    expect(r.success).toBe(true);
+  });
+  it('accepts fatal severity', () => {
+    const r = StructuredErrorSchema.safeParse({ phase: 'sync', severity: 'fatal', error: 'CRM 401', count: 1 });
+    expect(r.success).toBe(true);
+  });
+  it('rejects unknown severity', () => {
+    const r = StructuredErrorSchema.safeParse({ phase: 'x', severity: 'warn', error: 'y', count: 1 });
+    expect(r.success).toBe(false);
+  });
+  it('rejects non-positive count', () => {
+    const r = StructuredErrorSchema.safeParse({ phase: 'x', severity: 'fatal', error: 'y', count: 0 });
+    expect(r.success).toBe(false);
+  });
+  it('rejects empty phase', () => {
+    const r = StructuredErrorSchema.safeParse({ phase: '', severity: 'partial', error: 'y', count: 1 });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('ChannelRateLimitsSchema', () => {
+  it('accepts valid', () => {
+    const r = ChannelRateLimitsSchema.safeParse({
+      douyin: { search_qps: 0.5, user_videos_qps: 0.2, comment_qps: 1.0, friend_request_per_day: 5, dm_per_day: 10 },
+    });
+    expect(r.success).toBe(true);
+  });
+  it('rejects negative qps', () => {
+    const r = ChannelRateLimitsSchema.safeParse({ douyin: { search_qps: -1, user_videos_qps: 0.2, comment_qps: 1.0, friend_request_per_day: 5, dm_per_day: 10 } });
+    expect(r.success).toBe(false);
+  });
+  it('accepts qps=0 (halt signal)', () => {
+    const r = ChannelRateLimitsSchema.safeParse({ douyin: { search_qps: 0, user_videos_qps: 0.2, comment_qps: 1.0, friend_request_per_day: 5, dm_per_day: 10 } });
+    expect(r.success).toBe(true);
+  });
+  it('rejects negative daily quota', () => {
+    const r = ChannelRateLimitsSchema.safeParse({ douyin: { search_qps: 0.5, user_videos_qps: 0.2, comment_qps: 1.0, friend_request_per_day: -1, dm_per_day: 10 } });
+    expect(r.success).toBe(false);
   });
 });

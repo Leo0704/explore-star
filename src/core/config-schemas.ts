@@ -138,3 +138,53 @@ export function formatZodError(prefix: string, error: z.ZodError): string {
     .join('\n');
   return `${prefix} 校验失败 (${error.issues.length} 个问题):\n${issues}`;
 }
+
+// ============================================================================
+// 4. RetryConfig (profile.yaml — retry_config 块，Phase 1 #2)
+// ============================================================================
+
+export const RetryConfigSchema = z.object({
+  comment_level: z.object({
+    enabled: z.boolean().default(true),
+    max_attempts: z.number().int().positive().default(2),
+  }).passthrough().optional(),
+  lead_level: z.object({
+    enabled: z.boolean().default(true),
+    max_attempts: z.number().int().positive().default(3),
+    backoff_ms: z.array(z.number().int().positive()).default([1000, 2000, 4000]),
+    classify_errors: z.boolean().default(true),
+  }).passthrough().optional(),
+  step_level: z.object({
+    enabled: z.boolean().default(true),
+    max_browser_restarts: z.number().int().min(0).max(3).default(1),
+  }).passthrough().optional(),
+}).passthrough().optional();
+
+// ============================================================================
+// 5. StructuredError (RunDailyResult.errors 元素，Phase 1 #2)
+// ============================================================================
+
+export const StructuredErrorSchema = z.object({
+  phase: z.string().min(1),
+  severity: z.enum(['fatal', 'partial']),
+  error: z.string().min(1),
+  count: z.number().int().positive(),
+});
+
+export type StructuredError = z.infer<typeof StructuredErrorSchema>;
+
+// ============================================================================
+// 6. ChannelRateLimits (channels.yaml — channel_rate_limits 块，Phase 1 #2)
+// ============================================================================
+
+const ChannelRateLimitsDouyinSchema = z.object({
+  search_qps: z.number().min(0),
+  user_videos_qps: z.number().min(0),
+  comment_qps: z.number().min(0),
+  friend_request_per_day: z.number().int().min(0),
+  dm_per_day: z.number().int().min(0),
+});
+
+export const ChannelRateLimitsSchema = z.object({
+  douyin: ChannelRateLimitsDouyinSchema,
+}).passthrough();
