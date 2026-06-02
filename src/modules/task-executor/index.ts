@@ -6,10 +6,14 @@
  * V1 实现：mock 浏览器（不真调），留接口便于后续升级
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Task, TaskAction, TaskResult, Lead, CRMAdapter, LeadStatus } from '../../core/types.js';
 import { recordTaskExecuted } from '../feedback-analyzer/event-recorder.js';
+import { safetyConfigSchema, formatZodError } from '../../core/config-schemas.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'task-executor' });
 
 // ---------------------------------------------------------------------------
 // SafetyConfig（从 config/safety.json 读取）
@@ -59,37 +63,26 @@ export interface ExecutionResult {
 // ---------------------------------------------------------------------------
 
 export function loadSafetyConfig(configPath: string = 'config/safety.json'): SafetyConfig {
+  let raw: string;
   try {
-    const raw = readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw) as SafetyConfig;
-  } catch {
-    // fallback 默认值
-    return {
-      rate_limits: {
-        douyin: {
-          search_calls_per_hour: 10,
-          user_videos_calls_per_hour: 30,
-          friend_request_per_day: 5,
-          dm_per_day: 10,
-        },
-        min_interval_seconds: 3,
-        max_interval_seconds: 8,
-      },
-      daily_budget: {
-        videos: 50,
-        comments_scanned: 5000,
-        leads_created: 200,
-        engagement_actions: 20,
-      },
-      emergency_stop: 'config/EMERGENCY_STOP',
-      fatal_signals: [
-        'auth_wall_detected',
-        'captcha_triggered_3_times_in_1h',
-        'private_msg_rejected_2_times',
-        'ip_changed_5_times',
-      ],
-    };
+    raw = readFileSync(configPath, 'utf-8');
+  } catch (e) {
+    throw new Error(`读取 ${configPath} 失败：${e instanceof Error ? e.message : String(e)}`);
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`解析 ${configPath} 失败（不是合法 JSON）：${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const result = safetyConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(formatZodError(configPath, result.error));
+  }
+
+  return result.data as SafetyConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,12 +109,44 @@ interface RateLimitCounters {
   last_action_ms: number;
 }
 
+const RATE_COUNTERS_DIR = 'data';
+
+function getRateCountersPath(date: Date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return join(RATE_COUNTERS_DIR, `rate-counters-${yyyy}-${mm}-${dd}.json`);
+}
+
 export function createRateLimiter() {
-  const counters: RateLimitCounters = {
-    friend_requests_today: 0,
-    dm_today: 0,
-    last_action_ms: 0,
-  };
+  // 从磁盘加载当前日期的计数器；进程崩了重启能续
+  const counters: RateLimitCounters = loadFromDisk();
+
+  function loadFromDisk(): RateLimitCounters {
+    const filePath = getRateCountersPath();
+    if (!existsSync(filePath)) {
+      return { friend_requests_today: 0, dm_today: 0, last_action_ms: 0 };
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as Partial<RateLimitCounters>;
+      return {
+        friend_requests_today: Number(parsed.friend_requests_today) || 0,
+        dm_today: Number(parsed.dm_today) || 0,
+        last_action_ms: Number(parsed.last_action_ms) || 0,
+      };
+    } catch {
+      // 文件损坏时回退默认 0，避免阻塞执行
+      return { friend_requests_today: 0, dm_today: 0, last_action_ms: 0 };
+    }
+  }
+
+  function persistToDisk(): void {
+    const filePath = getRateCountersPath();
+    const tmpPath = `${filePath}.tmp`;
+    mkdirSync(RATE_COUNTERS_DIR, { recursive: true });
+    writeFileSync(tmpPath, JSON.stringify(counters, null, 2), 'utf-8');
+    renameSync(tmpPath, filePath);  // 原子替换
+  }
 
   return {
     canFriendRequest(config: SafetyConfig): boolean {
@@ -134,10 +159,12 @@ export function createRateLimiter() {
 
     recordFriendRequest(): void {
       counters.friend_requests_today++;
+      persistToDisk();
     },
 
     recordDm(): void {
       counters.dm_today++;
+      persistToDisk();
     },
 
     /** 随机间隔（3-8 秒真人节律） */
@@ -153,10 +180,14 @@ export function createRateLimiter() {
       counters.last_action_ms = Date.now();
     },
 
-    /** 重置每日计数（供编排器在每天开始时调用） */
+    /** 重置每日计数（删文件实现自然重置，跨日也走文件不存在→0） */
     resetDaily(): void {
       counters.friend_requests_today = 0;
       counters.dm_today = 0;
+      const filePath = getRateCountersPath();
+      if (existsSync(filePath)) {
+        unlinkSync(filePath);
+      }
     },
 
     getCounters(): Readonly<RateLimitCounters> {
@@ -389,7 +420,7 @@ export async function executeTasks(
         try {
           await opts.crm.updateStatus(taskToExecute.lead_cid, newState, `执行 ${taskToExecute.next_action} 成功`);
         } catch (e) {
-          console.warn(`[task-executor] CRM 回写失败（lead_cid=${taskToExecute.lead_cid}）：${e instanceof Error ? e.message : String(e)}`);
+          log.warn({ err: e, lead_cid: taskToExecute.lead_cid }, 'CRM 回写失败');
         }
       }
     }
@@ -485,7 +516,7 @@ export async function runCLI(args: string[]): Promise<void> {
   // 输出结果
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(results, null, 2), 'utf-8');
-  console.log(`[task-executor] 执行 ${results.length} 任务 → ${outputPath}`);
+  log.info({ count: results.length, outputPath }, '执行任务完成');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

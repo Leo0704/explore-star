@@ -13,6 +13,7 @@
  *   explore-star reactivate              —— 再激活沉默客户
  *   explore-star watch-bookings          —— 监听预约
  *   explore-star configure               —— 修改业务配置
+ *   explore-star retry-dlq               —— 重试 CRM 同步失败队列
  */
 
 const USAGE = `
@@ -29,10 +30,11 @@ const USAGE = `
   reactivate               再激活沉默客户
   watch-bookings           启动预约监听循环
   configure                查看/修改业务配置
+  retry-dlq                重试 CRM 同步失败队列（适合 cron）
 
 全局选项：
   --help, -h               显示帮助
-  --business <dir>         业务目录（默认 ./business.example/燃点-FDE）
+  --business <dir>         业务目录（必填）
 
 示例：
   npx explore-star init my-business
@@ -105,6 +107,11 @@ async function main() {
       }
       case 'configure': {
         const { runCLI } = await import('./configure.js');
+        await runCLI(rest);
+        break;
+      }
+      case 'retry-dlq': {
+        const { runCLI } = await import('./retry-dlq.js');
         await runCLI(rest);
         break;
       }

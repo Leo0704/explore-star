@@ -17,7 +17,7 @@ const USAGE = `
   npx explore-star analyze --business <dir> --input ./comments.json --output ./leads.json --threshold 0.7
 
 选项:
-  --business <dir>    业务目录
+  --business <dir>     业务目录（必填）
   --input <file>       输入 JSON 文件（Comment[]）
   --output <file>      输出 JSON 文件（Lead[]）
   --threshold <n>      意图分数阈值（默认 0.7）
@@ -25,14 +25,22 @@ const USAGE = `
 `;
 
 export async function runAnalyze(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：analyze 需要 --business <dir>');
+    process.exit(1);
+  }
   const inputPath = extractFlag(args, '--input');
   const outputPath = extractFlag(args, '--output');
   const threshold = parseFloat(extractFlag(args, '--threshold') || '0.7');
   const dryRun = args.includes('--dry-run');
 
-  if (showUsage(USAGE, args) || !inputPath) {
-    if (!inputPath) console.error('\n错误：缺少 --input 参数');
+  if (!inputPath) {
+    console.log(USAGE);
+    console.error('\n错误：缺少 --input 参数');
     return;
   }
 

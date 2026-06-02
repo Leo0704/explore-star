@@ -16,17 +16,22 @@ const USAGE = `
   npx explore-star reactivate --business <dir> --cid <comment_id>
 
 选项:
-  --business <dir>    业务目录
+  --business <dir>    业务目录（必填）
   --cid <id>          再激活指定 lead（省略则批量再激活沉默池）
   --dry-run           不实际发送，只显示目标客户
 `;
 
 export async function runReactivate(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：reactivate 需要 --business <dir>');
+    process.exit(1);
+  }
   const cid = extractFlag(args, '--cid');
   const dryRun = args.includes('--dry-run');
-
-  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 

@@ -16,7 +16,7 @@ const USAGE = `
   npx explore-star convert --business ./my-business --verbose
 
 选项:
-  --business <dir>    业务目录
+  --business <dir>    业务目录（必填）
   --date <YYYY-MM-DD> 生成指定日期的日报（默认今天）
   --verbose           详细输出（漏斗/营收/ROI/Hot Leads/At Risk）
   --output <file>     同时写入本地文件
@@ -24,13 +24,18 @@ const USAGE = `
 `;
 
 export async function runConvert(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：convert 需要 --business <dir>');
+    process.exit(1);
+  }
   const date = extractFlag(args, '--date') || new Date().toISOString().slice(0, 10);
   const verbose = args.includes('--verbose');
   const outputPath = extractFlag(args, '--output');
   const dryRun = args.includes('--dry-run');
-
-  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 

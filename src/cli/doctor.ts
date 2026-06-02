@@ -14,7 +14,6 @@ import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 
 const USAGE = `
 用法:
-  npx explore-star doctor
   npx explore-star doctor --business <dir>
 
 说明:
@@ -29,7 +28,12 @@ const USAGE = `
 `;
 
 export async function runDoctor(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：doctor 需要 --business <dir>');
+    process.exit(1);
+  }
 
   console.log('🔍 探星医生 v0.1.0\n');
   let pass = 0, warn = 0, fail = 0;

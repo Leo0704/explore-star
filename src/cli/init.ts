@@ -29,6 +29,9 @@ const USAGE = `
 export async function runInit(args: string[]): Promise<void> {
   // 解析参数
   let name = '';
+  // 注意：这里的 source 是「业务模板的源位置」（init 复制 business.example 给用户），
+  // 不是「用户业务目录」。所以保留默认 fallback 是正确的——其他 CLI 的 --business
+  // 才是用户业务目录，那个必须显式指定。init 的源目录允许用仓库自带的示例。
   let source = './business.example/燃点-FDE';
 
   for (let i = 0; i < args.length; i++) {

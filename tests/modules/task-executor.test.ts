@@ -13,6 +13,23 @@ import type { Task, SafetyConfig, CRMAdapter, LeadStatus } from '../../src/core/
 // 直接导入（不需要 mock）
 import { createRateLimiter, isEmergencyStop, reviewHook } from '../../src/modules/task-executor/index.js';
 
+// Y4：限速器持久化到 data/rate-counters-{YYYY-MM-DD}.json。
+// 测试间必须清掉该文件，否则跨测试的状态泄漏会让限速相关 case 失败。
+function getRateCounterFilePath(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `data/rate-counters-${yyyy}-${mm}-${dd}.json`;
+}
+
+beforeEach(async () => {
+  const file = getRateCounterFilePath();
+  if (existsSync(file)) {
+    await unlink(file);
+  }
+});
+
 const mockConfig: SafetyConfig = {
   rate_limits: {
     douyin: {

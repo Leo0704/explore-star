@@ -59,8 +59,8 @@ describe('CLI Commands', () => {
   describe('doctor', () => {
     it('应执行 5 类健康检查（含 Node / LLM / CRM / Adapter / 紧急停止）', async () => {
       const { runCLI } = await import('../src/cli/doctor.js');
-      // doctor 不解析 --help 标志：直接运行诊断
-      await runCLI([]);
+      // doctor 必填 --business
+      await runCLI(['--business', './business.example/燃点-FDE']);
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
       // 关键诊断项
       expect(combined).toMatch(/Node/);
@@ -186,6 +186,54 @@ describe('CLI Commands', () => {
       expect(combined).toMatch(/--set/);
     });
   });
+});
+
+/**
+ * R2 cleanup: 验证 7 个 CLI 子命令不传 --business 都应退出码 1。
+ *
+ * 测试风格：mock 掉 process.exit（与 cli-commands.test.ts 顶部约定一致），
+ * 用 try/catch 吞掉 process.exit 被 mock 后函数继续执行时抛出的 TypeError
+ * （这属于 test-infra 噪声，生产环境 process.exit 真退出不会触发）。
+ */
+describe('CLI Commands: 缺 --business 应退出 1', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let output: ReturnType<typeof captureOutput>;
+
+  beforeEach(() => {
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    output = captureOutput();
+  });
+
+  afterEach(() => {
+    exitSpy.mockRestore();
+    output.restore();
+  });
+
+  const cases: Array<[string, () => Promise<unknown>]> = [
+    ['analyze',         () => import('../src/cli/analyze.js').then(m => m.runCLI([]))],
+    ['nurture',         () => import('../src/cli/nurture.js').then(m => m.runCLI([]))],
+    ['insights',        () => import('../src/cli/insights.js').then(m => m.runCLI([]))],
+    ['watch-bookings',  () => import('../src/cli/watch-bookings.js').then(m => m.runCLI([]))],
+    ['reactivate',      () => import('../src/cli/reactivate.js').then(m => m.runCLI([]))],
+    ['convert',         () => import('../src/cli/convert.js').then(m => m.runCLI([]))],
+    ['configure',       () => import('../src/cli/configure.js').then(m => m.runCLI([]))],
+  ];
+
+  for (const [name, runner] of cases) {
+    it(`${name} 不传 --business 应打印 USAGE + 错误并 exit(1)`, async () => {
+      try {
+        await runner();
+      } catch {
+        // process.exit 被 mock 后函数继续跑，loadBusinessProfile(undefined) 会抛
+        // 生产环境 process.exit 真退出，不会到这里
+      }
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const errs = output.stderr.join('\n');
+      expect(errs).toMatch(new RegExp(`${name}\\s+需要\\s+--business`));
+      // 同时应打印 USAGE（含 --business 选项说明）
+      expect(output.stdout.join('\n')).toMatch(/--business/);
+    });
+  }
 });
 
 describe('CLI Index', () => {

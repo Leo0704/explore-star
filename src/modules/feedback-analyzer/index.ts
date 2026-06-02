@@ -19,6 +19,9 @@ import { computeHookStyleAttribution } from './hook-style-attribution.js';
 import { computePersonaValue } from './persona-value.js';
 import { computeInteractionTime } from './interaction-time.js';
 import { recordEvent } from './event-recorder.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'feedback-analyzer' });
 
 // ---------------------------------------------------------------------------
 // 配置常量（与 spec 同步）
@@ -203,7 +206,7 @@ async function applyKeywordWeights(
 
     if (changed) {
       await writeFile(path, yaml.stringify(config), 'utf-8');
-      console.log(`[feedback-analyzer] 回路 1：已更新 channels.yaml 关键词权重`);
+      log.info('回路 1：已更新 channels.yaml 关键词权重');
     }
   } catch {
     // channels.yaml 不存在或不可写，静默跳过
@@ -231,16 +234,22 @@ export async function runCLI(args: string[]): Promise<void> {
     const i = args.indexOf(flag);
     return i >= 0 ? args[i + 1] : undefined;
   };
-  const businessDir = get('--business') || './business.example/燃点-FDE';
+  const businessDir = get('--business');
+  if (!businessDir) {
+    console.error('错误：feedback-analyzer 需要 --business <dir>');
+    process.exit(1);
+  }
 
   const insights = await runWeeklyAnalysis(businessDir);
 
-  console.log(`[feedback-analyzer] 已生成 ${insights.week_start} 周报`);
-  console.log(`  学习期完成：${insights.learning_period_complete}`);
-  console.log(`  关键词：${insights.keyword_performance.length} 个`);
-  console.log(`  钩子风格：${insights.hook_style_performance.length} 个`);
-  console.log(`  Persona：${insights.persona_value.length} 个`);
-  console.log(`  最佳时段：${insights.best_interaction_times.length} 个 persona`);
+  log.info({
+    week_start: insights.week_start,
+    learning_period_complete: insights.learning_period_complete,
+    keyword_count: insights.keyword_performance.length,
+    hook_style_count: insights.hook_style_performance.length,
+    persona_count: insights.persona_value.length,
+    best_time_count: insights.best_interaction_times.length,
+  }, '已生成周报');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

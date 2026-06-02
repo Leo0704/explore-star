@@ -3,6 +3,9 @@
  */
 import { OpenAIEmbedding } from './openai.js';
 import { registerEmbedding, listEmbeddings } from '../registry.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'adapters/embeddings' });
 
 export function registerAll(): void {
   if (process.env.OPENAI_API_KEY) {
@@ -12,5 +15,5 @@ export function registerAll(): void {
   }
   // V2: DeepSeek / 本地 bge / ollama
 
-  console.log(`[adapters/embeddings] 已注册：${listEmbeddings().join(', ') || '（无 — 请设置 OPENAI_API_KEY）'}`);
+  log.info({ embeddings: listEmbeddings() }, '已注册 Embedding');
 }

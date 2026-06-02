@@ -9,7 +9,7 @@
 | **框架作者** | lylyyds |
 | **默认示例业务** | `business.example/` 内置「燃点 FDE」脱敏示例（仅作参考，非框架本身的一部分） |
 | **日期** | 2026-06-01 |
-| **状态** | 设计阶段，待审阅 |
+| **状态** | 设计 + 实现阶段（v1.9 已与代码对齐） |
 | **实现路线图** | 5-7 天（详见 §8，含 Day 0 准备） |
 
 > **关于「探星」与「燃点 FDE」的关系**：本框架（探星）由 lylyyds 为自身业务（燃点 FDE）开发并开源。「探星」= 框架名（可被任何人用于任意业务）；「燃点 FDE」= 默认 `business.example/` 下的示例业务（仅展示配置方法）。二者解耦，详见 §1.4 与 §2.3。
@@ -705,9 +705,9 @@ business/knowledge/
 
 **文件**：
 - `business/knowledge/`（业务方维护，4 类文档，MVP 6-8 个 markdown）
-- `src/rag/build-index.ts`（建索引）
+- `src/rag/index-builder.ts`（建索引）
 - `src/rag/retrieve.ts`（检索）
-- `src/rag/generate-hook.ts`（生成）
+- `src/rag/hook-generator.ts`（生成）
 
 **技术栈**：
 
@@ -1310,117 +1310,62 @@ async function executeTasks(tasks: Task[], config: SafetyConfig): Promise<Execut
 
 **目的**：把所有模块串起来，定时跑（侦察 → 分析 → 生成任务 → **自动执行** → 通知）。
 
-**文件**：
-- `run-daily.sh`（编排脚本）
-- `notify/wechat.ts`（微信通知）
-- `notify/feishu.ts`（飞书通知）
+**文件**（实现阶段从 shell 脚本改为 TS + 声明式配置，比设计更可靠）：
+- `src/orchestration/run-daily.ts`（编排主入口，TS 类型安全）
+- `src/orchestration/state.ts`（断点续传状态管理）
+- `src/orchestration/health-check.ts`（健康检查）
+- `schedule.yaml`（声明式 cron 配置，替代硬编码 shell cron）
+- `src/cli/schedule.ts`（schedule.yaml → 系统 crontab 的安装/卸载）
+- `src/adapters/notifier/`（通知适配器：console / feishu / wechat / email）
 
-**每日流程**（`run-daily.sh`）——**v1.4 真实流程**（基于本地 opencli 源码的 `search` + `user-videos --with_comments`）：
-```bash
-#!/bin/bash
-set -e
-cd "$(dirname "$0")"
-BUSINESS_DIR="${BUSINESS_DIR:-./business.example/燃点-FDE}"
-DATE=$(date +%Y-%m-%d)
-LOG="logs/${DATE}.log"
-mkdir -p logs data/tmp
-
-echo "[$(date)] 探星启动" | tee -a "$LOG"
-
-# 读取 source.mode（默认 sec_uid）
-MODE=$(yq '.source.mode // "sec_uid"' "${BUSINESS_DIR}/channels.yaml")
-echo "[$(date)] 数据源模式: ${MODE}" | tee -a "$LOG"
-
-# ① 侦察阶段：拉视频 + 评论（按 source.mode 走两条路径之一）
-> data/tmp/raw-${DATE}.jsonl
-
-if [ "$MODE" = "sec_uid" ] || [ "$MODE" = "both" ]; then
-  # 路径 A（V1 推荐）：按目标 KOL 拉视频+评论
-  USER_LIMIT=$(yq '.target_sec_uids.user_videos_limit // 20' "${BUSINESS_DIR}/channels.yaml")
-  COMMENT_LIMIT=$(yq '.target_sec_uids.comment_limit // 10' "${BUSINESS_DIR}/channels.yaml")
-  SEC_UIDS=$(yq -o=csv -I=0 '.target_sec_uids[]' "${BUSINESS_DIR}/channels.yaml" | tr -d '"' | head -10)
-  for sec_uid in $SEC_UIDS; do
-    [ -z "$sec_uid" ] && continue
-    echo "[$(date)] 拉 KOL ${sec_uid} 的视频+评论" | tee -a "$LOG"
-    opencli douyin user-videos "$sec_uid" \
-      --limit "$USER_LIMIT" \
-      --with_comments true \
-      --comment_limit "$COMMENT_LIMIT" \
-      --format json \
-      >> data/tmp/raw-${DATE}.jsonl || echo "[WARN] KOL ${sec_uid} 失败" | tee -a "$LOG"
-    sleep $((RANDOM % 5 + 3))s
-  done
-fi
-
-if [ "$MODE" = "keyword" ] || [ "$MODE" = "both" ]; then
-  # 路径 B（V1 备选）：按关键词搜视频（评论=0，需二次调用）
-  for kw in $(yq '.search.keywords | keys | .[]' "${BUSINESS_DIR}/channels.yaml" | head -5); do
-    [ -z "$kw" ] && continue
-    echo "[$(date)] 搜索关键词: ${kw}" | tee -a "$LOG"
-    opencli douyin search "$kw" --limit 10 --format json \
-      >> data/tmp/raw-${DATE}.jsonl || echo "[WARN] 关键词 ${kw} 失败" | tee -a "$LOG"
-    sleep $((RANDOM % 5 + 3))s
-  done
-fi
-
-# ② 标准化为统一 Comment[] schema（处理两路径的输出差异）
-node dist/normalize.js \
-  --input data/tmp/raw-${DATE}.jsonl \
-  --output data/tmp/comments-${DATE}.json
-
-# ③ 预处理：去重/去 emoji/去营销号/过滤 min_likes/过滤 max_age_days
-node scripts/filter-comments.js \
-  --input data/tmp/comments-${DATE}.json \
-  --output data/tmp/comments-filtered-${DATE}.json \
-  --config "${BUSINESS_DIR}/channels.yaml"
-
-# ④ LLM 意图分析
-node dist/intent.js \
-  --input data/tmp/comments-filtered-${DATE}.json \
-  --output data/tmp/leads-${DATE}.json \
-  --threshold 0.7 \
-  --business "${BUSINESS_DIR}"
-
-# ⑤ 同步 CRM（CRM 类型 / table-id / 字段映射 全部从 business/crm.yaml 读取）
-node dist/crm-sync.js \
-  --input data/tmp/leads-${DATE}.json \
-  --config "${BUSINESS_DIR}/crm.yaml"
-
-# ⑥ 引导任务生成（不自动执行——人执行）
-node dist/nurture.js \
-  --output data/tmp/tasks-${DATE}.json \
-  --business "${BUSINESS_DIR}"
-
-# ⑦ 通知（早报 + 任务清单）
-node dist/notify.js \
-  --tasks data/tmp/tasks-${DATE}.json \
-  --report "logs/${DATE}.md" \
-  --business "${BUSINESS_DIR}"
+**每日流程**（`src/orchestration/run-daily.ts`）—— 串联 7 步，支持 `--dry-run` / `--skip-llm` / `--step` / `--mode read-only`：
+```
+① assertLoggedIn()     — 登录态前置检查（失败 → 飞书告警 + 立刻停手）
+② 侦察阶段            — ChannelAdapter.search() + getUserVideos()
+③ LLM 意图分析        — IntentAnalyzer.analyzeBatch()
+④ CRM 同步            — CRMAdapter.syncLeads()（含 DLQ 重试队列）
+⑤ 引导任务生成        — generateDailyTasks()
+⑥ 自动执行            — executeTasks()（登录态浏览器 + 限速 + 可选钩子审核）
+⑦ 通知                — Notifier.send()（早报 / 晚报 / 转化日报）
 ```
 
-**Cron 配置**（完整清单——7 个定时任务）：
-```bash
-# ① 早 09:00 主流程（侦察 + 分析 + 生成任务 + 自动执行 + 早报通知）
-0 9 * * * /Users/lylyyds/Desktop/explore-star/run-daily.sh
+**断点续传**：`state.json` 记录每步状态（pending / running / done / failed），中断后重启跳过已完成步骤。
 
-# ② 晚 18:00 推送晚报（今日互动统计 + 明日预览）
-0 18 * * * cd /Users/lylyyds/Desktop/explore-star && node dist/daily-report.js
+**登录态失效处理**（R1）：`assertLoggedIn()` 在步骤 ① 调用 `channel.ping()`，若 `loggedIn=false` → 抛 `LoginRequiredError` → 打 state 标记 + 飞书告警 → 当天停止。**不做半自动降级**——根因必须人处理。
 
-# ③ 晚 22:00 推送转化日报（漏斗/营收/ROI/Hot Leads/At Risk）
-0 22 * * * cd /Users/lylyyds/Desktop/explore-star && node dist/conversion-report.js
+**Cron 配置**（`schedule.yaml` 声明式，替代设计阶段的硬编码 shell cron）：
+```yaml
+jobs:
+  - name: "主流程（侦察 + 分析 + 生成任务 + 自动执行 + 早报）"
+    cron: "0 9 * * *"
+    command: "run"
 
-# ④ 每 6h 健康检查（今日是否成功/磁盘/cron 存活）
-0 */6 * * * /Users/lylyyds/Desktop/explore-star/health-check.sh
+  - name: "晚报（今日互动统计）"
+    cron: "0 18 * * *"
+    command: "daily-report"
 
-# ⑤ 每周日凌晨 03:00 反馈分析（关键词归因/钩子风格/persona 价值/互动时段）
-0 3 * * 0 cd /Users/lylyyds/Desktop/explore-star && node dist/analyze-feedback.js
+  - name: "转化日报（漏斗/营收/ROI）"
+    cron: "0 22 * * *"
+    command: "conversion-report"
 
-# ⑥ 每周一 09:00 推送优化建议（含 5 条回路的调优结果）
-0 9 * * 1 cd /Users/lylyyds/Desktop/explore-star && node dist/optimization-report.js
+  - name: "反馈分析（关键词归因/钩子风格/persona 价值/互动时段）"
+    cron: "0 3 * * 0"
+    command: "insights"
 
-# ⑦ 每月 1 日 10:00 沉默客户再激活（30 天无互动的已加微 lead）
-0 10 1 * * cd /Users/lylyyds/Desktop/explore-star && node dist/reactivate.js
+  - name: "优化建议推送"
+    cron: "0 9 * * 1"
+    command: "optimization-report"
+
+  - name: "沉默客户再激活"
+    cron: "0 10 1 * *"
+    command: "reactivate"
+
+  - name: "健康检查"
+    cron: "0 */6 * * *"
+    command: "doctor"
 ```
+
+安装方式：`npx explore-star schedule --install`（解析 schedule.yaml → 写入系统 crontab）。
 
 **早 09:30 推送**：
 ```
@@ -1453,7 +1398,17 @@ node dist/notify.js \
 
 > 详细接口规范见 **§13.4.2 附录**。
 >
-> 简言之：`LLMProvider` 接口在 `src/adapters/llm/base.ts`，内置 4 个实现（OpenAI / DeepSeek / Anthropic / Ollama），用户通过 `business/profile.yaml` 的 `llm:` 字段选择。API Key 从环境变量读。
+> `LLMProvider` 接口在 `src/core/types.ts`（§13.4 统一定义，不在 adapters 单独放 base.ts）。实现阶段合并了 OpenAI 和 DeepSeek 为一个 `OpenAICompatibleLLM` 类（两者都是 OpenAI 兼容 API），减少重复代码。
+>
+> **文件**（`src/adapters/llm/`）：
+> - `openai-compatible.ts` — 合并实现（DeepSeek + OpenAI + 任何 OpenAI 兼容 API）
+> - `anthropic.ts` — Anthropic Claude
+> - `ollama.ts` — 本地 Ollama（免费）
+> - `_cache.ts` — LLM 响应缓存（降本）
+> - `_retry.ts` — 重试逻辑（指数退避）
+> - `index.ts` — registerAll() 注册入口
+>
+> 用户通过 `profile.yaml` 的 `llm:` 字段选择 provider，API Key 从环境变量读。支持 `fallback` 降级链。
 
 ---
 
@@ -1966,11 +1921,11 @@ async function loadLatestInsights(businessName: string): Promise<WeeklyInsights 
 
 ### 5.1 错误处理（3 层防御）
 
-**第 1 层：模块内自愈** —— 每个模块自带 3 次重试（指数退避 1s, 3s, 9s），失败后写 `data/failed/<module>-<date>.json` 跳过。
+**第 1 层：模块内自愈** —— 每个模块自带 3 次重试（指数退避 1s, 3s, 9s），失败后写 `data/failed/<module>-<date>.json` 跳过。LLM 调用额外有 `_cache.ts` 缓存 + `_retry.ts` 重试；CRM 同步失败写入 DLQ（`src/modules/crm-sync/dlq.ts`），可通过 `npx explore-star retry-dlq` 手动重试。
 
-**第 2 层：编排器级别** —— `run-daily.sh` 维护 `data/state.json`，每步完成后写入状态；下次启动跳过已完成步骤（断点续传）。脚本末尾根据 EXIT_CODE 推送告警。
+**第 2 层：编排器级别** —— `src/orchestration/state.ts` 维护 `data/state.json`，每步完成后写入状态（pending / running / done / failed）；下次启动跳过已完成步骤（断点续传）。登录态失效（`assertLoggedIn()` 失败）→ 飞书告警 + 立刻停手，不做半自动降级。
 
-**第 3 层：系统级监控** —— `health-check.sh`（独立 cron，每 6h 跑）：检查今日是否成功、磁盘是否充足、cron 是否还在跑。
+**第 3 层：系统级监控** —— `npx explore-star doctor`（由 schedule.yaml 每 6h 调度）：检查今日是否成功、磁盘是否充足、adapter 健康状态。进程锁（`src/cli/run-lock.ts` + `proper-lockfile`）防止并发跑 cron。
 
 ### 5.2 账号安全 5 铁律（自动执行的安全边界）
 
@@ -1984,27 +1939,34 @@ async function loadLatestInsights(businessName: string): Promise<WeeklyInsights 
 | **4. 错峰运行** | 早 9 / 下午 2 / 晚 8 点（避免连续猛跑）| 推荐 |
 | **5. 养号优先** | 用注册 > 6 个月、有内容的**老号**跑探星 | 必做 |
 
-**限速配置**（`config/safety.json`）：
+**限速配置**（`config/safety.json`，由 Zod schema 严格校验）：
 ```json
 {
   "rate_limits": {
-    "douyin.search.calls_per_hour": 10,
-    "douyin.comment.calls_per_hour": 30,
-    "douyin.friend_request.per_day": 5,
-    "douyin.dm.per_day": 10,
-    "opencli.min_interval_seconds": 3,
-    "opencli.max_interval_seconds": 8
+    "douyin": {
+      "search_calls_per_hour": 10,
+      "user_videos_calls_per_hour": 30,
+      "friend_request_per_day": 5,
+      "dm_per_day": 10
+    },
+    "min_interval_seconds": 3,
+    "max_interval_seconds": 8
   },
   "daily_budget": {
     "videos": 50,
     "comments_scanned": 5000,
     "leads_created": 200,
     "engagement_actions": 20
+  },
+  "hook_review": {
+    "enabled": true,
+    "review_before_execute": true,
+    "auto_apply_after_weeks": 2
   }
 }
 ```
 
-**风控信号监测**（`scripts/safety-monitor.js`）每次 run 后跑：
+**风控信号监测**（内联在 `task-executor` 模块中，实时拦截）：
 - 滑块验证 > 3 次 → 告警
 - 搜索空结果率 > 50% → 告警（疑似限流）
 - IP 切换 > 5 次 → 告警
@@ -2266,7 +2228,7 @@ explore-star/
 
 | 任务 | 工时 |
 |---|---|
-| 写 `rag/build-index.ts` + `retrieve.ts` + `generate-hook.ts`（带模板）| 3h |
+| 写 `rag/index-builder.ts` + `retriever.ts` + `hook-generator.ts`（带模板）| 3h |
 | 写 `src/adapters/crm/feishu.ts` | 2h |
 | 写 `src/adapters/crm/csv.ts`（开发用） | 0.5h |
 | 手工评估 5 个钩子质量 + 飞书同步测试 | 0.5h |
@@ -2407,115 +2369,122 @@ explore-star/
 
 ## 13. 附录
 
-### 13.1 目录结构（最终）
+### 13.1 目录结构（实现对齐版）
+
+> 设计阶段的目录结构在实现时有多处优化：LLM 合并为 openai-compatible、RAG 独立为 src/rag/、search/comment-fetch 合并到 channel adapter、编排从 shell 改为 TS、通知从独立目录改为 adapter。以下为实际代码结构。
 
 ```
 explore-star/                          # 项目根
-├── README.md                          # 中英双语
-├── README.zh-CN.md
+├── README.md
 ├── LICENSE                            # MIT
-├── CONTRIBUTING.md                    # 欢迎贡献新 adapter
-├── CHANGELOG.md
-├── package.json                       # npm 包配置
+├── package.json
 ├── tsconfig.json
-├── .gitignore
+├── vitest.config.ts
+├── profile.yaml                       # 业务画像（根目录，运行时默认读这里）
+├── crm.yaml                           # CRM 字段映射
+├── conversion.yaml                    # 转化路径配置
+├── schedule.yaml                      # 声明式 cron 配置
+├── notifier.yaml                      # 通知配置
 │
-├── src/                               # 核心代码（不含任何业务）
+├── src/
 │   ├── core/
+│   │   ├── types.ts                   # 单一真相源：所有接口 + 类型
+│   │   ├── schemas.ts                 # Zod schema（运行时校验）
+│   │   ├── config-schemas.ts          # 启动时 Zod 校验（profile + safety）
 │   │   ├── business-profile.ts        # profile.yaml 加载
-│   │   ├── config.ts                  # 全局配置
-│   │   └── types.ts
+│   │   ├── logger.ts                  # pino 日志
+│   │   └── redact.ts                  # 日志脱敏
 │   ├── adapters/
-│   │   ├── types.ts                   # 接口定义
-│   │   ├── registry.ts                # adapter 注册
+│   │   ├── registry.ts                # 6 类 adapter 注册中心
+│   │   ├── types.ts                   # 类型重导出
 │   │   ├── llm/
-│   │   │   ├── base.ts
-│   │   │   ├── openai.ts
-│   │   │   ├── deepseek.ts
+│   │   │   ├── openai-compatible.ts   # 合并实现（DeepSeek + OpenAI + 兼容 API）
 │   │   │   ├── anthropic.ts
-│   │   │   └── ollama.ts
+│   │   │   ├── ollama.ts
+│   │   │   ├── _cache.ts              # LLM 响应缓存（降本）
+│   │   │   ├── _retry.ts              # 重试逻辑（指数退避）
+│   │   │   └── index.ts               # registerAll()
 │   │   ├── crm/
-│   │   │   ├── base.ts
 │   │   │   ├── feishu.ts
 │   │   │   ├── notion.ts
 │   │   │   ├── airtable.ts
-│   │   │   └── csv.ts
+│   │   │   ├── csv.ts
+│   │   │   ├── _shared.ts             # CRM 共享工具
+│   │   │   └── index.ts
 │   │   ├── channel/
-│   │   │   ├── base.ts
-│   │   │   └── douyin.ts
-│   │   └── notifier/
-│   │       ├── base.ts
-│   │       ├── wechat.ts
-│   │       ├── feishu.ts
-│   │       └── email.ts
+│   │   │   ├── douyin.ts              # 合并 search + comment-fetch + user-videos
+│   │   │   └── index.ts
+│   │   ├── notifier/
+│   │   │   ├── console.ts             # 开发/调试用
+│   │   │   ├── feishu.ts
+│   │   │   ├── wechat.ts
+│   │   │   ├── email.ts
+│   │   │   └── index.ts
+│   │   ├── embeddings/
+│   │   │   ├── openai.ts
+│   │   │   └── index.ts
+│   │   └── booking/
+│   │       ├── base.ts                # BookingProvider 接口
+│   │       ├── feishu-calendar.ts
+│   │       └── index.ts
 │   ├── modules/
-│   │   ├── search/
-│   │   ├── comment-fetch/
-│   │   ├── intent-analyzer/
-│   │   ├── hook-generator/            # 含 RAG
-│   │   ├── crm-sync/
-│   │   ├── nurture-engine/
-│   │   ├── task-executor/             # 🆕 自动执行引导任务（登录态浏览器）
-│   │   ├── conversion-engine/         # 🆕 转化引擎
-│   │   └── feedback-analyzer/         # 🆕 反馈分析器
+│   │   ├── intent-analyzer/           # LLM 意图分析
+│   │   ├── crm-sync/                  # CRM 同步 + DLQ 重试队列
+│   │   ├── nurture-engine/            # 引导引擎（任务编排 + 状态机）
+│   │   ├── task-executor/             # 自动执行（浏览器操作 + 钩子审核）
+│   │   ├── conversion-engine/         # 转化引擎（物料推送 + 预约监听 + 再激活）
+│   │   └── feedback-analyzer/         # 反馈分析（关键词归因 + 钩子 A/B + persona 价值）
+│   ├── rag/                           # RAG 知识库（独立于 modules/）
+│   │   ├── hook-generator.ts
+│   │   ├── index-builder.ts
+│   │   ├── retriever.ts
+│   │   └── index.ts
 │   ├── orchestration/
-│   │   ├── run-daily.ts
-│   │   ├── state.ts                   # 断点续传
+│   │   ├── run-daily.ts               # 每日编排主入口（TS，非 shell）
+│   │   ├── state.ts                   # 断点续传状态管理
 │   │   └── health-check.ts
-│   ├── cli/
-│   │   ├── index.ts                   # CLI 入口
-│   │   ├── init.ts
-│   │   ├── doctor.ts
-│   │   ├── run.ts
-│   │   ├── search.ts
-│   │   ├── analyze.ts
-│   │   ├── generate-hook.ts
-│   │   └── nurture.ts
-│   └── notify/
-│       └── ...
+│   └── cli/
+│       ├── index.ts                   # CLI 入口（commander）
+│       ├── init.ts                    # npx explore-star init
+│       ├── run.ts                     # npx explore-star run
+│       ├── analyze.ts                 # npx explore-star analyze
+│       ├── nurture.ts                 # npx explore-star nurture
+│       ├── convert.ts                 # npx explore-star convert
+│       ├── insights.ts                # npx explore-star insights
+│       ├── reactivate.ts              # npx explore-star reactivate
+│       ├── configure.ts               # npx explore-star configure
+│       ├── doctor.ts                  # npx explore-star doctor
+│       ├── schedule.ts                # npx explore-star schedule（管理 cron）
+│       ├── watch-bookings.ts          # npx explore-star watch-bookings
+│       ├── retry-dlq.ts               # npx explore-star retry-dlq
+│       ├── run-lock.ts                # 进程锁（proper-lockfile）
+│       └── _shared.ts                 # CLI 共享工具
 │
-├── business.example/                  # 🆕 作者业务的脱敏示例（业务方 init 时复制并改名）
-│   └── 燃点-FDE/                       # 默认示例（作者的真实业务脱敏版）
-│       ├── README.md
+├── business.example/                  # 示例业务（业务方 init 时复制并改名）
+│   └── 燃点-FDE/
 │       ├── profile.yaml
-│       ├── prompts/
-│       │   ├── intent-system.md
-│       │   ├── intent-user.md
-│       │   ├── hook-reply.md
-│       │   └── hook-dm.md
-│       ├── knowledge/
-│       │   ├── 01-cases/
-│       │   ├── 02-methodology/
-│       │   ├── 03-hooks/
-│       │   └── 04-faq/
 │       ├── crm.yaml
-│       ├── channels.yaml
-│       └── conversion.yaml
+│       ├── conversion.yaml
+│       ├── prompts/
+│       └── knowledge/
+│
+├── config/
+│   └── safety.json                    # 安全配置（限速 + 限额 + hook_review）
 │
 ├── docs/
 │   ├── superpowers/specs/
 │   │   └── 2026-06-01-explore-star-design.md   ← 本文档
-│   ├── quickstart.md                  # 🆕 5 分钟上手
-│   ├── configuration.md               # 🆕 详细配置
-│   ├── adapters.md                    # 🆕 写自定义 adapter
+│   ├── quickstart.md
+│   ├── configuration.md
+│   ├── adapters.md
 │   ├── faq.md
-│   └── compliance.md                  # 合规使用指南
-│
-├── scripts/
-│   ├── filter-videos.js
-│   ├── integration-test.sh
-│   ├── e2e-test.sh
-│   ├── safety-monitor.ts
-│   ├── test-resume.sh
-│   └── publish.sh                     # 发布到 npm
+│   └── compliance.md
 │
 ├── data/                              # 运行时数据（gitignore）
 │   ├── state.json
-│   ├── vectors.db
-│   ├── tmp/
-│   └── failed/
+│   └── feedback/
 ├── logs/                              # 日志（gitignore）
-└── backups/                           # 备份（gitignore）
+└── tests/                             # 测试（vitest）
 ```
 
 ### 13.2 关联项目
@@ -2540,6 +2509,7 @@ explore-star/                          # 项目根
 | v1.6 | 2026-06-01 | **全自动化**：① §1.2 从「半自动」改为「全自动」——引导任务由登录态浏览器自动执行，人只需看日报 + 处理告警；② §1.3 移除「不做自动私信」非目标；③ §2.1/§2.2 架构图和数据流更新为自动执行；④ §3.6 新增 §3.6.5 自动执行引擎（task-executor 模块）——浏览器操作映射 + 可选钩子审核模式；⑤ §3.6.2 互动效果感知改为系统自动检测（不再依赖人工标记）；⑥ §3.7 编排脚本新增步骤 ⑦ 自动执行；⑦ §5.2 限速规则从「人工保护」改为「自动执行的安全边界」；⑧ §13.1 目录结构新增 task-executor / conversion-engine / feedback-analyzer |
 | v1.7 | 2026-06-01 | **蓝本定型**：补齐 6 个接口级空白——① §3.6.1 新增 Task / TaskAction / TaskResult 接口；② §3.6.5 新增 ExecutionResult / RiskSignal / SafetyConfig 接口；③ §3.6.5 新增 browserExecute() 函数签名；④ §2.4.2 新增 channels.yaml 完整 schema；⑤ §2.4.3 新增 conversion.yaml 完整 schema；⑥ §2.4.1 新增 profile.yaml 完整 schema |
 | v1.8 | 2026-06-01 | **闭环终审修复**：① §3.6.1 新增状态转移表 + buildTask() 完整定义（含 current_state → next_action 映射 + 24h 冷却期 + opt_out 检查）；② §3.7 CRON 从 3 个补全到 7 个（+转化日报/反馈分析/优化建议/再激活）；③ §3.11 新增冷启动行为定义（weekly-insights.json 不存在时各回路的 fallback 值 + loadLatestInsights() 函数）；④ §3.3 Lead 接口新增 opt_out / last_task_executed_at / last_task_result / last_response_text / execution_count / response_count 字段；⑤ §3.6.3 新增 opt_out 检测机制（拒绝信号词匹配）；⑥ §3.5 CRM 字段映射新增 6 个互动效果字段；⑦ §2.4.2 channels.yaml 新增 weight_min / weight_max / weight_cooldown_weeks 防震荡参数；⑧ §3.6.5 hook_review 默认值设为 true（前 2 周建议开启）|
+| v1.9 | 2026-06-02 | **实现对齐**：将设计文档与实际代码对齐。① §3.7 编排器从 shell 脚本改为 TS（`src/orchestration/run-daily.ts`）+ 声明式 `schedule.yaml`；② §3.8 LLM Provider 合并 OpenAI/DeepSeek 为 `openai-compatible.ts`；③ §5.1 错误处理更新为 TS orchestration state + DLQ + 进程锁；④ §5.2 safety.json 结构对齐实际（嵌套 `rate_limits.douyin`）+ hook_review 默认值确认为 true；⑤ §13.1 目录结构全面重写（RAG 独立 `src/rag/`、search/comment-fetch 合并到 channel adapter、通知改为 adapter 模式、新增 _cache/_retry/dlq/run-lock 等）；⑥ §13.3 记录实现阶段改进。**设计列了但实现评估后不需要的**：`cli/search.ts`、`cli/generate-hook.ts`（功能已内联在编排流程中）、`docs/business-models/`（框架跑通后再补）、`scripts/safety-monitor.js`（安全检查内联在 task-executor 中，实时拦截优于事后复盘）。|
 
 ---
 

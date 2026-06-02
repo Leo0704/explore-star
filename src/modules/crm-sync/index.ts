@@ -7,6 +7,9 @@
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { CRMAdapter, Lead, SyncResult } from '../../core/types.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'crm-sync' });
 
 export interface CrmSyncOptions {
   /** 失败归档目录，默认 data/failed/ */
@@ -98,7 +101,7 @@ async function archiveFailedLeads(
   };
 
   await writeFile(filePath, JSON.stringify(archive, null, 2), 'utf-8');
-  console.log(`[crm-sync] 归档 ${report.failed} 条失败记录 → ${filePath}`);
+  log.info({ failed: report.failed, filePath }, '归档失败记录');
 }
 
 // ---------------------------------------------------------------------------
@@ -112,9 +115,16 @@ export async function runCLI(args: string[]): Promise<void> {
   };
 
   const crmType = get('--crm') || 'csv';
-  const crmConfigPath = get('--crm-config') || 'business.example/燃点-FDE/crm.yaml';
+  const crmConfigPath = get('--crm-config');
   const inputPath = get('--input') || 'data/tmp/leads.json';
   const outputPath = get('--output') || 'data/tmp/sync-report.json';
+
+  if (!crmConfigPath) {
+    console.error('错误：crm-sync 需要 --crm-config <path>');
+    console.error('  --crm csv:   传入 CSV 文件路径（如 ./data/leads.csv）');
+    console.error('  --crm feishu: 传入 JSON 配置文件路径');
+    process.exit(1);
+  }
 
   const { readFile, writeFile, mkdir } = await import('node:fs/promises');
   const { dirname } = await import('node:path');
@@ -132,7 +142,7 @@ export async function runCLI(args: string[]): Promise<void> {
   // 输出报告
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2), 'utf-8');
-  console.log(`[crm-sync] 同步完成：${report.synced}/${report.total} 成功`);
+  log.info({ synced: report.synced, total: report.total }, '同步完成');
 }
 
 // ---------------------------------------------------------------------------

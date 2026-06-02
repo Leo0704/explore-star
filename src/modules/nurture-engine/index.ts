@@ -12,6 +12,9 @@ import type { Lead, LeadStatus, Task, TaskAction, BusinessProfile, ConversionCon
 import { recordStatusChange } from '../feedback-analyzer/event-recorder.js';
 import { checkAbandonment, checkOptOut } from './smart-abandon.js';
 import { buildTask } from './state-machine.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'nurture-engine' });
 
 export interface NurtureEngineOptions {
   profile: BusinessProfile;
@@ -254,7 +257,7 @@ export async function runCLI(args: string[]): Promise<void> {
 
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(tasks, null, 2), 'utf-8');
-  console.log(`[nurture] 生成 ${tasks.length} 任务 → ${outputPath}`);
+  log.info({ count: tasks.length, outputPath }, '生成任务');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

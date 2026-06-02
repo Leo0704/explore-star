@@ -14,6 +14,9 @@
 
 import type { Task } from '../../core/types.js';
 import { generateReviewNote } from './hook-review-helper.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'hook-review' });
 
 export interface HookReviewResult {
   approved: boolean;
@@ -174,7 +177,7 @@ export async function reviewHook(
   const appSecretEnv = config.appSecretEnv ?? 'FEISHU_APP_SECRET';
   if (!tableId || !process.env[appIdEnv] || !process.env[appSecretEnv]) {
     // 凭证缺失 → 降级直接批准（开发环境）
-    console.warn(`[hook-review] 飞书凭证缺失（FEISHU_REVIEW_TABLE_ID / ${appIdEnv} / ${appSecretEnv}），降级为直接批准`);
+    log.warn({ appIdEnv, appSecretEnv }, '飞书凭证缺失，降级为直接批准');
     return { approved: true };
   }
 

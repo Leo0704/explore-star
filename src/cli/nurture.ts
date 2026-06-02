@@ -18,19 +18,24 @@ const USAGE = `
   npx explore-star nurture --business ./my-business --output ./tasks.json
 
 选项:
-  --business <dir>    业务目录
+  --business <dir>    业务目录（必填）
   --output <file>     输出 JSON 文件（Task[]）
   --limit <n>         每日最大任务数（默认 20）
   --dry-run           不写入文件，只打印结果
 `;
 
 export async function runNurture(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：nurture 需要 --business <dir>');
+    process.exit(1);
+  }
   const outputPath = extractFlag(args, '--output');
   const limit = parseInt(extractFlag(args, '--limit') || '20');
   const dryRun = args.includes('--dry-run');
-
-  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 

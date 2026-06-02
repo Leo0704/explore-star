@@ -28,12 +28,17 @@ const USAGE = `
 `;
 
 export async function runConfigure(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：configure 需要 --business <dir>');
+    process.exit(1);
+  }
   const disableFeature = extractFlag(args, '--disable');
   const enableFeature = extractFlag(args, '--enable');
   const setKeyValue = extractFlag(args, '--set');
-
-  if (showUsage(USAGE, args)) return;
 
   if (!disableFeature && !enableFeature && !setKeyValue) {
     // 显示当前配置

@@ -6,6 +6,9 @@ import { WechatNotifier } from './wechat.js';
 import { FeishuWebhookNotifier } from './feishu.js';
 import { EmailNotifier } from './email.js';
 import { registerNotifier, listNotifiers } from '../registry.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'adapters/notifier' });
 
 export function registerAll(): void {
   registerNotifier('console', new ConsoleNotifier());
@@ -28,7 +31,7 @@ export function registerAll(): void {
     ));
   }
 
-  console.log(`[adapters/notifier] 已注册：${listNotifiers().join(', ')}`);
+  log.info({ notifiers: listNotifiers() }, '已注册 Notifier');
 }
 
 export { ConsoleNotifier } from './console.js';

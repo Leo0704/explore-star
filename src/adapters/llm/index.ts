@@ -5,6 +5,9 @@ import { OpenAICompatibleLLM } from './openai-compatible.js';
 import { registerLLM, listLLMs } from '../registry.js';
 import { AnthropicLLM } from './anthropic.js';
 import { OllamaLLM } from './ollama.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'adapters/llm' });
 
 export function registerAll(): void {
   // DeepSeek (V1.4 默认)
@@ -36,5 +39,5 @@ export function registerAll(): void {
     process.env.OLLAMA_MODEL || 'qwen2.5',
   ));
 
-  console.log(`[adapters/llm] 已注册：${listLLMs().join(', ') || '（无 — 请设置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY）'}`);
+  log.info({ llms: listLLMs() }, '已注册 LLM');
 }

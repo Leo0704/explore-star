@@ -177,10 +177,20 @@ describe('Orchestration', () => {
     it('dry-run 模式应 resolve 且不抛错', async () => {
       const { runDaily } = await import('../src/orchestration/run-daily.js');
 
+      // 注入 mock channel：R1 assertLoggedIn 不会因测试环境未登录而抛 LoginRequiredError
+      const mockChannel = {
+        name: 'mock',
+        rateLimits: { search_per_hour: 0, user_videos_per_hour: 0, comment_per_hour: 0, friend_request_per_day: 0, dm_per_day: 0 },
+        async ping() { return { ok: true, loggedIn: true }; },
+        async search() { return []; },
+        async getUserVideos() { return []; },
+      };
+
       // dry-run 不写真实数据
       const result = await runDaily({
         businessDir: './business.example/燃点-FDE',
         dryRun: true,
+        injectChannel: mockChannel as any,
       });
 
       // 至少返回可识别的对象

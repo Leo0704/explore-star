@@ -16,4 +16,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+      - run: npm run test:coverage
       - run: npm audit --audit-level=high

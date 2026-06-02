@@ -6,6 +6,9 @@ import { FeishuCRM } from './feishu.js';
 import { NotionCRM } from './notion.js';
 import { AirtableCRM } from './airtable.js';
 import { registerCRM, listCRMs } from '../registry.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'adapters/crm' });
 
 export function registerAll(): void {
   // CSV：始终注册（开发/调试零配置）
@@ -27,7 +30,7 @@ export function registerAll(): void {
     // V2: 按 crm.yaml 配置动态创建实例
   }
 
-  console.log(`[adapters/crm] 已注册：${listCRMs().join(', ')}`);
+  log.info({ crms: listCRMs() }, '已注册 CRM');
 }
 
 export { CsvCRM } from './csv.js';

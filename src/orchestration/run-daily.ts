@@ -14,6 +14,9 @@ import { registerBuiltins, getChannel, getNotifier } from '../adapters/registry.
 import type { Comment, Lead, Task } from '../core/types.js';
 import { executeTasks, loadSafetyConfig, type ExecutionResult, type SafetyConfig } from '../modules/task-executor/index.js';
 import { loadState, updateStep, markComplete, resetForNewDay } from './state.js';
+import { logger } from '../core/logger.js';
+
+const log = logger.child({ module: 'run-daily' });
 
 export interface RunDailyOptions {
   businessDir: string;
@@ -24,6 +27,10 @@ export interface RunDailyOptions {
   injectLLM?: { complete(p: string): Promise<string> };
   /** 只跑特定步骤（0-6） */
   step?: number;
+  /** 手动开关：read-only 模式跳过 phase 7b（任务执行）。由人通过 CLI 启用，绝不自动降级。 */
+  mode?: 'full' | 'read-only';
+  /** 测试注入：覆盖 channel（用于 R1 assertLoggedIn 的 mock，避免依赖真 opencli/Chrome） */
+  injectChannel?: import('../core/types.js').ChannelAdapter;
   /** 测试注入：覆盖 executeTasks（避免需要真浏览器） */
   injectExecuteTasks?: typeof import('../modules/task-executor/index.js').executeTasks;
   /** 测试注入：覆盖 generateDailyTasks */
@@ -45,12 +52,51 @@ export interface RunDailyResult {
 // 主入口
 // ---------------------------------------------------------------------------
 
+/**
+ * R1：登录态失效信号。抛出后由 runDaily 外层捕获，触发飞书告警 + 立刻停手。
+ */
+export class LoginRequiredError extends Error {
+  readonly code = 'LOGIN_REQUIRED' as const;
+  constructor(message = '检测到登录态失效') {
+    super(message);
+    this.name = 'LoginRequiredError';
+  }
+}
+
+/** R1：调用 channel.ping() 探测登录态，未登录则抛 LoginRequiredError */
+async function assertLoggedIn(channel: import('../core/types.js').ChannelAdapter): Promise<void> {
+  const result = await channel.ping();
+  if (!result.loggedIn) {
+    throw new LoginRequiredError('channel.ping() 返回 loggedIn=false');
+  }
+}
+
+/** R1：登录失效时打 state 标记 + 飞书告警（fallback console） */
+async function handleLoginRequired(businessDir: string): Promise<void> {
+  await updateStep(0, 'failed', undefined, 'login_required');
+
+  const message = {
+    title: '[探星] 登录失效已停止',
+    body: `业务=${businessDir}\n时间=${new Date().toISOString()}\n请重新登录后再次运行`,
+    level: 'critical' as const,
+  };
+
+  try {
+    const feishu = getNotifier('feishu');
+    await feishu.send(message);
+  } catch {
+    // feishu 未注册（缺 FEISHU_WEBHOOK_URL）或发送失败 → fallback console
+    const consoleNotifier = getNotifier('console');
+    await consoleNotifier.send({ ...message, title: `[fallback:console] ${message.title}` });
+  }
+}
+
 export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   const t0 = Date.now();
   const date = new Date().toISOString().slice(0, 10);
   const errors: string[] = [];
 
-  console.log(`[run-daily] 启动 | business=${opts.businessDir} | date=${date}`);
+  log.info({ business: opts.businessDir, date, mode: opts.mode ?? 'full' }, '启动');
 
   // 检查是否新的一天，如果是则重置状态
   const state = await loadState();
@@ -58,6 +104,23 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     await resetForNewDay();
   }
 
+  try {
+    return await runDailyBody(opts, t0, date, errors);
+  } catch (e) {
+    if (e instanceof LoginRequiredError) {
+      await handleLoginRequired(opts.businessDir);
+    }
+    throw e;
+  }
+}
+
+/** 主流程体（拆出来便于外层 try-catch 统一捕获 LoginRequiredError） */
+async function runDailyBody(
+  opts: RunDailyOptions,
+  t0: number,
+  date: string,
+  errors: string[],
+): Promise<RunDailyResult> {
   // 1. 加载业务配置
   await updateStep(0, 'running');
   const loaded = await loadBusinessProfile(opts.businessDir);
@@ -66,6 +129,10 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
 
   // 2. 注册所有内置 adapter
   await registerBuiltins();
+
+  // 2.5 R1：登录态前置检查 —— 未登录则 throw LoginRequiredError，外层会飞书告警 + 停手
+  // 测试可通过 opts.injectChannel 注入 mock channel
+  await assertLoggedIn(opts.injectChannel ?? getChannel('douyin'));
 
   // 3. 选数据源模式
   const mode = channels.source?.mode ?? 'sec_uid';
@@ -87,13 +154,13 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     videosScanned += result.videos;
   }
 
-  console.log(`[run-daily] 收集到 ${comments.length} 条评论 from ${videosScanned} 个视频`);
+  log.info({ comments: comments.length, videos: videosScanned }, '收集评论');
   await updateStep(0, 'completed', { comments, videosScanned });
 
   // 4. 预处理（去重 / 过滤）
   await updateStep(1, 'running');
   const filtered = preprocessComments(comments, channels);
-  console.log(`[run-daily] 过滤后 ${filtered.length} 条`);
+  log.info({ filtered: filtered.length }, '过滤评论');
   await updateStep(1, 'completed', { filtered: filtered.length });
 
   // 5. LLM 意图分析
@@ -132,7 +199,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     }
     await updateStep(1, 'completed', { leadsCreated: leads.length });
   }
-  console.log(`[run-daily] 生成 ${leads.length} 个高意向 lead`);
+  log.info({ leads: leads.length }, '生成 lead');
 
   // 5.5 RAG 钩子生成（§3.4 / §3.7 步骤 [1.6]）
   // 用知识库 + 反馈驱动风格替换 intent analyzer 生成的通用钩子
@@ -164,10 +231,10 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
           // 单个 lead RAG 失败不影响其他，保留 intent analyzer 的钩子
         }
       }
-      console.log(`[run-daily] RAG 钩子生成：${ragSuccess}/${leads.length} 成功`);
+      log.info({ success: ragSuccess, total: leads.length }, 'RAG 钩子生成');
     } catch {
       // embedding adapter 未注册 → 冷启动，跳过 RAG，保留 intent analyzer 的钩子
-      console.log(`[run-daily] RAG 跳过（embedding adapter 未配置）`);
+      log.info('RAG 跳过（embedding adapter 未配置）');
     }
   }
 
@@ -177,7 +244,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
     try {
       const crm = await createCRM(profile);
       const syncResult = await crm.syncLeads(leads);
-      console.log(`[run-daily] CRM 同步：${syncResult.synced} 成功 / ${syncResult.failed} 失败`);
+      log.info({ synced: syncResult.synced, failed: syncResult.failed }, 'CRM 同步');
       if (syncResult.failed > 0) {
         syncResult.errors.forEach(e => errors.push(`[crm] ${e.cid}: ${e.error}`));
       }
@@ -211,7 +278,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
       await mkdir(dirname(tasksPath), { recursive: true });
       const { writeFile } = await import('node:fs/promises');
       await writeFile(tasksPath, JSON.stringify(tasks, null, 2), 'utf-8');
-      console.log(`[run-daily] 生成 ${tasksCount} 个任务 → ${tasksPath}`);
+      log.info({ count: tasksCount, path: tasksPath }, '生成任务');
       await updateStep(3, 'completed', { tasksCount });
     } catch (e) {
       errors.push(`任务生成失败：${e instanceof Error ? e.message : String(e)}`);
@@ -224,14 +291,14 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   // 7b. 任务执行（§3.6.5）—— 把生成的 task 喂给 task-executor
   let tasksExecuted = 0;
   let executionResults: ExecutionResult[] = [];
-  if (!opts.dryRun && tasks.length > 0) {
+  if (!opts.dryRun && tasks.length > 0 && opts.mode !== 'read-only') {
     try {
       const safety: SafetyConfig = loadSafetyConfig();
       const execCrm = await createCRM(profile);
       const execFn = opts.injectExecuteTasks ?? executeTasks;
       executionResults = await execFn(tasks, safety, { crm: execCrm });
       tasksExecuted = executionResults.length;
-      console.log(`[run-daily] 任务执行：${tasksExecuted}/${tasksCount} 完成`);
+      log.info({ executed: tasksExecuted, total: tasksCount }, '任务执行');
     } catch (e) {
       errors.push(`任务执行失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -255,7 +322,12 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
       // 生成并推送转化日报
       const report = await generateDailyReport(date, convOpts);
       await pushDailyReport(report);
-      console.log(`[run-daily] 转化日报：新发现=${report.new_leads} 加微=${report.new_wechat_added} 预约=${report.new_bookings} 成交=${report.new_deals_closed}`);
+      log.info({
+        new_leads: report.new_leads,
+        new_wechat_added: report.new_wechat_added,
+        new_bookings: report.new_bookings,
+        new_deals_closed: report.new_deals_closed,
+      }, '转化日报');
     } catch (e) {
       errors.push(`转化引擎失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -265,9 +337,10 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   await updateStep(5, 'running');
   try {
     const notifier = getNotifier('console');
+    const modeNote = opts.mode === 'read-only' ? '\n🔒 模式：read-only（已跳过任务执行）' : '';
     await notifier.send({
       title: `✨ 探星早报 ${date}`,
-      body: `📊 扫描：${videosScanned} 视频 / ${comments.length} 评论 / ${leads.length} 高意向\n🎯 待执行任务：${tasksCount} 条\n✅ 已执行：${tasksExecuted} 条`,
+      body: `📊 扫描：${videosScanned} 视频 / ${comments.length} 评论 / ${leads.length} 高意向\n🎯 待执行任务：${tasksCount} 条\n✅ 已执行：${tasksExecuted} 条${modeNote}`,
       level: 'info',
     });
     await updateStep(5, 'completed', { notified: true });
@@ -288,7 +361,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   };
 
   await markComplete(true);
-  console.log(`[run-daily] 完成 | 耗时 ${result.duration_ms}ms | ${errors.length} errors`);
+  log.info({ duration_ms: result.duration_ms, errors: errors.length }, '完成');
   return result;
 }
 
@@ -306,7 +379,7 @@ async function fetchViaSecUid(
   const commentLimit = channels.target_sec_uids?.comment_limit ?? 10;
 
   if (secUids.length === 0) {
-    console.warn(`[run-daily] sec_uid 模式但 channels.yaml 里 sec_uids 为空，跳过`);
+    log.warn('sec_uid 模式但 channels.yaml 里 sec_uids 为空，跳过');
     return { comments: [], videos: 0 };
   }
 
@@ -339,7 +412,7 @@ async function fetchViaSecUid(
         }
       }
     } catch (e) {
-      console.warn(`[run-daily] KOL ${secUid} 拉取失败：${e instanceof Error ? e.message : String(e)}`);
+      log.warn({ err: e, secUid }, 'KOL 拉取失败');
     }
   }
   return { comments, videos };
@@ -370,7 +443,7 @@ async function fetchViaKeyword(
       const result = await channel.search({ keywords: [kw], limit });
       videos.push(...result);
     } catch (e) {
-      console.warn(`[run-daily] 关键词 ${kw} 搜索失败：${e instanceof Error ? e.message : String(e)}`);
+      log.warn({ err: e, keyword: kw }, '关键词搜索失败');
     }
   }
 

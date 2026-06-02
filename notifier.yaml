@@ -1,0 +1,45 @@
+# 探星通知配置
+#
+# 选择通知渠道 + 配置连接信息
+# 支持多渠道同时启用（如飞书群 + 微信）
+
+# 默认通知渠道（早报/晚报/告警都走这个）
+default: console    # console | feishu | wechat | email
+
+# 各渠道配置
+channels:
+  # 控制台输出（开发/调试用，零配置）
+  console:
+    enabled: true
+
+  # 飞书机器人 WebHook
+  feishu:
+    enabled: false
+    webhook_url_env: FEISHU_BOT_WEBHOOK_URL    # 环境变量名
+    # 可选：签名校验
+    secret_env: FEISHU_BOT_WEBHOOK_SECRET
+
+  # 微信（通过 opencli weixin 发送）
+  wechat:
+    enabled: false
+    # 微信通知需要 opencli 已安装且登录态可用
+
+  # 邮件 SMTP
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    user_env: EMAIL_USER                       # 环境变量名
+    pass_env: EMAIL_PASS                       # 环境变量名
+    to: "you@example.com"
+
+# 按消息类型覆盖渠道（可选）
+# 不填则用 default
+overrides:
+  # 告警走多个渠道（同时推送）
+  alert:
+    - feishu
+    - wechat
+  # 转化日报只走飞书
+  conversion_report:
+    - feishu

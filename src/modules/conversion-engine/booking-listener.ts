@@ -7,6 +7,9 @@
 
 import type { CRMAdapter, LeadStatus } from '../../core/types.js';
 import { getBookingProvider } from '../../adapters/registry.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'booking-listener' });
 
 export interface BookingListenerOptions {
   crm: CRMAdapter;
@@ -20,7 +23,7 @@ export interface BookingListenerOptions {
 export async function watchBookings(
   opts: BookingListenerOptions,
 ): Promise<void> {
-  console.log(`[booking-listener] 启动`);
+  log.info('启动');
 
   let provider: ReturnType<typeof getBookingProvider> | null = null;
   try {
@@ -30,7 +33,7 @@ export async function watchBookings(
   }
 
   if (!provider) {
-    console.log('[booking-listener] 无可用 BookingProvider，退出');
+    log.info('无可用 BookingProvider，退出');
     return;
   }
 
@@ -38,11 +41,11 @@ export async function watchBookings(
     for await (const event of provider.watchBookings()) {
       if (event.type === 'booked' && event.cid) {
         await opts.crm.updateStatus(event.cid, '已预约', `预约事件：${event.channel}`);
-        console.log(`[booking-listener] 已预约 lead ${event.cid}`);
+        log.info({ cid: event.cid }, '已预约 lead');
       }
     }
   } catch (e) {
-    console.error(`[booking-listener] 监听出错：${e instanceof Error ? e.message : String(e)}`);
+    log.error({ err: e }, '监听出错');
   }
 }
 

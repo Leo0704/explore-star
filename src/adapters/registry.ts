@@ -19,6 +19,9 @@ import type {
   LLMProvider, CRMAdapter, ChannelAdapter, Notifier, EmbeddingProvider,
 } from '../core/types.js';
 import type { BookingProvider } from './booking/base.js';
+import { logger } from '../core/logger.js';
+
+const log = logger.child({ module: 'adapters/registry' });
 
 // 6 个 Map 维护实例池（按 name 索引）
 const llmRegistry = new Map<string, LLMProvider>();
@@ -33,7 +36,7 @@ const bookingRegistry = new Map<string, BookingProvider>();
 // ---------------------------------------------------------------------------
 export function registerLLM(name: string, impl: LLMProvider): void {
   if (llmRegistry.has(name)) {
-    console.warn(`[adapters] LLM "${name}" 重复注册，将覆盖`);
+    log.warn({ name }, 'LLM 重复注册，将覆盖');
   }
   llmRegistry.set(name, impl);
 }
@@ -55,7 +58,7 @@ export function listLLMs(): string[] {
 // ---------------------------------------------------------------------------
 export function registerCRM(name: string, impl: CRMAdapter): void {
   if (crmRegistry.has(name)) {
-    console.warn(`[adapters] CRM "${name}" 重复注册，将覆盖`);
+    log.warn({ name }, 'CRM 重复注册，将覆盖');
   }
   crmRegistry.set(name, impl);
 }

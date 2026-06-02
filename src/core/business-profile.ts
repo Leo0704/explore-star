@@ -16,6 +16,7 @@ import yaml from 'yaml';
 import type {
   BusinessProfile, ChannelsConfig, ConversionConfig,
 } from './types.js';
+import { businessProfileSchema, formatZodError } from './config-schemas.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -36,10 +37,10 @@ export interface LoadedBusiness {
  *   - channels.yaml     → ChannelsConfig（V1.4 起，target_sec_uids 在此）
  *   - conversion.yaml   → ConversionConfig
  *
- * 校验规则（按 §2.3 MVP）：
- *   - business.name 非空
- *   - business.value_prop 非空
+ * 校验（启动时 fail-fast）：见 src/core/config-schemas.ts 的 businessProfileSchema
+ *   - business.name / value_prop 非空
  *   - target_personas 至少 1 个
+ *   - intent_signals 至少 1 个
  *   - llm.provider / llm.model / llm.api_key_env 必填
  *   - crm.type 必填
  */
@@ -49,15 +50,20 @@ export async function loadBusinessProfile(businessDir: string): Promise<LoadedBu
   const conversionPath = join(businessDir, 'conversion.yaml');
 
   // profile.yaml 必须存在；channels / conversion 可选（有默认值）
-  let profile: BusinessProfile;
+  let profileRaw: unknown;
   try {
     const raw = await readFile(profilePath, 'utf-8');
-    profile = yaml.parse(raw);
+    profileRaw = yaml.parse(raw);
   } catch (e) {
     throw new Error(`加载 ${profilePath} 失败：${e instanceof Error ? e.message : String(e)}`);
   }
 
-  validateProfile(profile);
+  const result = businessProfileSchema.safeParse(profileRaw);
+  if (!result.success) {
+    console.error(formatZodError(profilePath, result.error));
+    process.exit(1);
+  }
+  const profile = result.data as BusinessProfile;
 
   // channels.yaml —— 不存在则给默认（sec_uid 模式，空 sec_uids）
   let channels: ChannelsConfig;
@@ -100,33 +106,4 @@ export async function loadBusinessProfile(businessDir: string): Promise<LoadedBu
     promptsDir,
     knowledgeDir,
   };
-}
-
-/**
- * 校验 BusinessProfile 必填字段
- */
-function validateProfile(p: BusinessProfile): void {
-  const required: Array<[string, unknown]> = [
-    ['business.name', p.business?.name],
-    ['business.value_prop', p.business?.value_prop],
-    ['target_personas', p.target_personas],
-    ['llm.provider', p.llm?.provider],
-    ['llm.model', p.llm?.model],
-    ['llm.api_key_env', p.llm?.api_key_env],
-    ['crm.type', p.crm?.type],
-  ];
-
-  for (const [field, value] of required) {
-    if (value === undefined || value === null || value === '') {
-      throw new Error(`BusinessProfile 缺少必填字段: ${field}`);
-    }
-  }
-
-  if (!Array.isArray(p.target_personas) || p.target_personas.length === 0) {
-    throw new Error('target_personas 至少要 1 个');
-  }
-
-  if (!p.intent_signals || p.intent_signals.length === 0) {
-    throw new Error('intent_signals 至少要 1 个信号词（供意图分析 prompt）');
-  }
 }

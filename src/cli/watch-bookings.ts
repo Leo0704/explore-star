@@ -20,15 +20,20 @@ const USAGE = `
   此命令会持续运行，直到手动终止（Ctrl+C）。
 
 选项:
-  --business <dir>    业务目录
+  --business <dir>    业务目录（必填）
   --poll-interval <ms>  轮询间隔（默认 30000ms）
 `;
 
 export async function runWatchBookings(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
-  const pollInterval = parseInt(extractFlag(args, '--poll-interval') || '30000');
-
   if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：watch-bookings 需要 --business <dir>');
+    process.exit(1);
+  }
+  const pollInterval = parseInt(extractFlag(args, '--poll-interval') || '30000');
 
   await registerBuiltins();
 

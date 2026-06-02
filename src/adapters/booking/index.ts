@@ -9,6 +9,9 @@
 
 import { registerBookingProvider, listBookingProviders } from '../registry.js';
 import { FeishuCalendarBooking } from './feishu-calendar.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'adapters/booking' });
 
 export function registerAll(): void {
   // 飞书日历
@@ -17,7 +20,7 @@ export function registerAll(): void {
     registerBookingProvider('feishu_calendar', provider);
   }
 
-  console.log(`[adapters/booking] 已注册：${listBookingProviders().join(', ')}`);
+  log.info({ providers: listBookingProviders() }, '已注册 BookingProvider');
 }
 
 export { FeishuCalendarBooking } from './feishu-calendar.js';

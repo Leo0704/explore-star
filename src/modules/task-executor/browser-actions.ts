@@ -15,6 +15,7 @@
 
 import type { Task } from '../../core/types.js';
 import type { ExecutionResult, RiskSignal } from './index.js';
+import { resolveChromePath } from './chrome-paths.js';
 
 // ---------------------------------------------------------------------------
 // 风控信号工具
@@ -86,9 +87,14 @@ export async function launchBrowser(config: BrowserConfig): Promise<import('pupp
   const puppeteer = await getPuppeteer();
   if (!puppeteer) return null;
 
+  // 解析 Chrome 路径（env > config.executablePath > puppeteer 默认值）；
+  // 找不到 throw —— 这是配置错误，不是 per-task 失败
+  // 可选链：允许旧测试/调用方在 config 缺失时走 puppeteer 默认
+  const executablePath = await resolveChromePath(config?.executablePath);
+
   try {
     _browser = await puppeteer.launch({
-      executablePath: config.executablePath,
+      executablePath,
       headless: config.headless ?? false,
       // 关键：userDataDir 让 puppeteer 复用 Chrome Profile（已登录态）
       args: [

@@ -20,6 +20,9 @@ import { watchBookings, syncBookingsOnce } from './booking-listener.js';
 import { findDormantLeads } from './dormant-finder.js';
 import { reactivateLead as doReactivate, reactivateDormantPool } from './reactivate.js';
 import { recordEvent } from '../feedback-analyzer/event-recorder.js';
+import { logger } from '../../core/logger.js';
+
+const log = logger.child({ module: 'conversion-engine' });
 
 export interface ConversionEngineOptions {
   profile: BusinessProfile;
@@ -266,7 +269,7 @@ export async function runCLI(args: string[]): Promise<void> {
   const reportPath = `./data/feedback/daily-${report.date}.json`;
   await mkdir(dirname(reportPath), { recursive: true });
   await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf-8');
-  console.log(`[convert] 转化日报已生成 → ${reportPath}`);
+  log.info({ reportPath }, '转化日报已生成');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

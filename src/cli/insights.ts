@@ -16,18 +16,23 @@ const USAGE = `
   npx explore-star insights --business ./my-business --last 4weeks
 
 选项:
-  --business <dir>    业务目录
+  --business <dir>    业务目录（必填）
   --last <n>          参考过去几周数据（默认 4）
   --output <file>     输出文件路径（默认 data/feedback/weekly-insights.json）
   --dry-run           不写入文件，只打印摘要
 `;
 
 export async function runInsights(args: string[]): Promise<void> {
-  const businessDir = extractFlag(args, '--business') || './business.example/燃点-FDE';
+  if (showUsage(USAGE, args)) return;
+
+  const businessDir = extractFlag(args, '--business');
+  if (!businessDir) {
+    console.log(USAGE);
+    console.error('\n错误：insights 需要 --business <dir>');
+    process.exit(1);
+  }
   const outputPath = extractFlag(args, '--output') || './data/feedback/weekly-insights.json';
   const dryRun = args.includes('--dry-run');
-
-  if (showUsage(USAGE, args)) return;
 
   await registerBuiltins();
 
