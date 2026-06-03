@@ -310,7 +310,7 @@ export async function executeTasks(
         executed_at: new Date().toISOString(),
         error_message: '今日好友申请已达上限',
       });
-      break;
+      continue;
     }
 
     if (taskToExecute.next_action === 'dm' && !rateLimiter.canDm(config)) {
@@ -322,7 +322,7 @@ export async function executeTasks(
         executed_at: new Date().toISOString(),
         error_message: '今日私信已达上限',
       });
-      break;
+      continue;
     }
 
     // 6. 真人节律随机延迟
@@ -352,7 +352,7 @@ export async function executeTasks(
 
     // 8.5 CRM 回写（Finding 2）：按 next_action 推进 lead.status
     // 失败 best-effort，不中断主流程
-    if (opts.crm && result.result !== 'skipped') {
+    if (opts.crm && result.result !== 'skipped' && !result.result.startsWith('failed')) {
       const newState = nextStateForAction(taskToExecute.next_action, taskToExecute.current_state);
       if (newState) {
         try {

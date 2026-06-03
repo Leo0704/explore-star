@@ -29,10 +29,17 @@ export async function generateSearchKeywords(
 ): Promise<KeywordMap> {
   try {
     const prompt = buildPrompt(profile);
-    const raw = await llm.complete(prompt, {
-      temperature: 0.5,
-      maxTokens: 500,
-      responseFormat: 'json',
+    // P0-G 修复：关键词生成也接 cache，相同 business profile 跑多次不重复扣费
+    const { completeWithCache } = await import('../adapters/llm/_cache.js');
+    const raw = await completeWithCache({
+      model: profile.llm.model,
+      systemPrompt: `你是「${profile.business.name}」的搜索关键词生成器`,
+      userPrompt: prompt,
+      fetcher: async () => llm.complete(prompt, {
+        temperature: 0.5,
+        maxTokens: 500,
+        responseFormat: 'json',
+      }),
     });
 
     const keywords = parseKeywords(raw);

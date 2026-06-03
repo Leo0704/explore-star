@@ -101,6 +101,16 @@ export const businessProfileSchema = z.object({
   buying_stages: z.array(BuyingStageSchema).optional(),
   llm: LLMConfigSchema,
   crm: CRMConfigSchema,
+  // P0-E 修复：以下字段让硬编码的 channel/embedding/notifier 名字可配置
+  channel: z.object({
+    name: NonEmptyString,
+  }).passthrough().optional(),
+  embedding: z.object({
+    provider: NonEmptyString,
+  }).passthrough().optional(),
+  notifier: z.object({
+    default: NonEmptyString.optional(),
+  }).passthrough().optional(),
   hook_config: z.object({
     style: z.string().optional(),
     max_length: z.number().int().positive().optional(),

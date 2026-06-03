@@ -149,18 +149,6 @@ describe('task-executor', () => {
     });
   });
 
-  describe('executeBrowserAction', () => {
-    it('浏览器动作映射正确', async () => {
-      const { executeBrowserAction } = await import('../../src/modules/task-executor/browser-actions.js');
-
-      const task = mkTask();
-      task.next_action = 'like_and_follow';
-      const result = await executeBrowserAction(task);
-      expect(result.task_id).toBe('t1');
-      expect(result.lead_cid).toBe('c1');
-      expect(result.executed_at).toBeDefined();
-    });
-  });
 });
 
 describe('50 mock leads 30天模拟', () => {

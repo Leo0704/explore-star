@@ -21,7 +21,7 @@ const mockConversion: ConversionConfig = {
     { id: 'closed', name: '已成交', is_terminal: true },
   ],
   success_states: ['closed'],
-  post_add_asset: { type: 'pdf', name: '测试物料', path: './test.pdf' },
+  post_add_asset: { type: 'link', name: '测试物料', path: './test.pdf' },
   booking_url: 'https://test.com/book',
   message_template: '{{nickname}} 您好，这是测试物料',
   booking_provider: { type: 'manual', config: {} },

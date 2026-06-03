@@ -98,7 +98,7 @@ export function buildTask(
     current_state: lead.status,
     next_action: transition.action,
     hook,
-    hook_style: (lead as any).hook_style ?? 'default',
+    hook_style: lead.hook_style ?? 'default',
     priority: lead.intent_score > 0.85 ? 'high' : lead.intent_score > 0.7 ? 'medium' : 'low',
     persona: lead.persona,
     scheduled_at: '',  // 由 generateDailyTasks 填充
@@ -108,33 +108,3 @@ export function buildTask(
   };
 }
 
-// ---------------------------------------------------------------------------
-// 下一动作
-// ---------------------------------------------------------------------------
-
-export function nextActionForState(status: LeadStatus): TaskAction | null {
-  switch (status) {
-    case '新发现': return 'like_and_follow';
-    case '已关注': return 'comment_reply';
-    case '已互动': return 'friend_request';
-    case '已加好友': return 'dm';
-    case '已私信': return 'send_material';
-    case '已加微': return null;  // 交给 §3.10 转化引擎
-    case '已预约': return null;  // 等待客户回访
-    case '沉默': return 'dm';  // 再激活
-    case '已再激活': return 'dm';
-    default: return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 状态标记
-// ---------------------------------------------------------------------------
-
-export function markStatus(lead: Lead, to: LeadStatus, note?: string): void {
-  if (lead.status === to) return;
-  const from = lead.status;
-  lead.status = to;
-  lead.status_history.push({ from, to, at: new Date().toISOString(), note });
-  (lead as any).updated_at = new Date().toISOString();
-}

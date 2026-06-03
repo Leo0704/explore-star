@@ -25,8 +25,20 @@ import { logger } from '../core/logger.js';
 import { appendRunHistory, type RunHistoryEntry } from './run-history.js';
 import { resolveNotifiers as defaultResolveNotifiers } from '../core/notifier-resolver.js';
 import { CostTracker } from '../adapters/llm/_cost-tracker.js';
+import { checkAll } from './health-check.js';
+import { RateLimiter, type ChannelRateLimitsConfig } from '../core/rate-limiter.js';
+import { CircuitBreaker } from '../core/circuit-breaker.js';
 
 const log = logger.child({ module: 'run-daily' });
+
+/**
+ * 当前 run 的子 logger（带 runId / business）。
+ * 由 runDaily() 入口设置、退出清理；其他函数读 currentLog 即可拿到 runId 上下文。
+ * 不用 AsyncLocalStorage 是因为 logger.child 创建很轻；不用参数穿透是因为要改 5+ 函数签名。
+ * 类型用 ReturnType<typeof logger.child> 而不是 log 的类型，因为 runDaily 会用不同 module 串。
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let currentLog: any = log;
 
 export interface RunDailyOptions {
   businessDir: string;
@@ -112,7 +124,25 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   const date = new Date().toISOString().slice(0, 10);
   const errors: string[] = [];
 
-  log.info({ business: opts.businessDir, date, mode: opts.mode ?? 'full' }, '启动');
+  // P0-I 修复：构造带 runId 的子 logger，让本次 run 的所有 log 可被 grep 串起来
+  const runId = crypto.randomUUID();
+  const prevLog = currentLog;
+  currentLog = logger.child({ module: 'run-daily', runId, business: opts.businessDir });
+  try {
+    return await runDailyInner(opts, t0, date, errors, runId);
+  } finally {
+    currentLog = prevLog;
+  }
+}
+
+async function runDailyInner(
+  opts: RunDailyOptions,
+  t0: number,
+  date: string,
+  errors: string[],
+  runId: string,
+): Promise<RunDailyResult> {
+  currentLog.info({ business: opts.businessDir, date, mode: opts.mode ?? 'full' }, '启动');
 
   // 检查是否新的一天，如果是则重置状态
   const state = await loadState();
@@ -123,7 +153,6 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
   const historyPath = opts.injectHistoryPath ?? './data/run_history.jsonl';
   const writeHistory = opts.injectWriteHistory !== false;
   const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
   let exitReason: RunHistoryEntry['exit_reason'] = 'failed';
   const stepDurations: Record<string, number> = {};
   const phaseCounts: RunHistoryEntry['phase_counts'] = {
@@ -179,7 +208,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
           cost_estimate,
         });
       } catch (historyErr) {
-        log.error({ err: historyErr, runId }, '写 run_history 失败（不阻塞主流程）');
+        currentLog.error({ err: historyErr, runId }, '写 run_history 失败（不阻塞主流程）');
       }
     }
 
@@ -196,7 +225,7 @@ export async function runDaily(opts: RunDailyOptions): Promise<RunDailyResult> {
           });
         }
       } catch (notifErr) {
-        log.error({ err: notifErr }, 'finally 块 notifier 发送异常（不阻塞）');
+        currentLog.error({ err: notifErr }, 'finally 块 notifier 发送异常（不阻塞）');
       }
     }
   }
@@ -225,6 +254,10 @@ async function runDailyBody(
   let knowledgeDir: string | null = null;
   let comments: Comment[] = [];
   let videosScanned = 0;
+  // P0-A #1 #2：RateLimiter 和 CircuitBreaker 提到 runDailyBody 顶部
+  // 让 recon 和 analysis 两个 step 都能用
+  let rateLimiter: RateLimiter | null = null;
+  let llmBreaker: CircuitBreaker | null = null;
   try {
     // 1. 加载业务配置
     await updateStep(0, 'running');
@@ -242,7 +275,9 @@ async function runDailyBody(
 
     // 2.5 R1：登录态前置检查 —— 未登录则 throw LoginRequiredError，外层会飞书告警 + 停手
     // 测试可通过 opts.injectChannel 注入 mock channel
-    await assertLoggedIn(opts.injectChannel ?? getChannel('douyin'));
+    // P0-E 修复：channel 名由 profile.channel.name 决定，默认 'douyin'
+    const channelName = profile?.channel?.name ?? 'douyin';
+    await assertLoggedIn(opts.injectChannel ?? getChannel(channelName));
 
     // 3. 选数据源模式
     const mode = channels.source?.mode ?? 'sec_uid';
@@ -254,32 +289,68 @@ async function runDailyBody(
         : (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
       const { generateSearchKeywords, writebackGeneratedKeywords } = await import('../modules/keyword-generator.js');
       const generated = await generateSearchKeywords(profile, llmForKw);
-      if (Object.keys(generated).length > 0) {
+      if (Object.keys(generated).length === 0) {
+        // 静默路径
+      } else {
         channels.search = {
           ...channels.search,
           keywords: { ...channels.search?.keywords, ...generated },
         };
-        log.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
+        currentLog.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
         // Bug 15：落盘 channels.yaml，避免下次 run 重复生成
         await writebackGeneratedKeywords(join(opts.businessDir, 'channels.yaml'), generated);
       }
     }
 
+    // P0-A #1 修复：构造 RateLimiter 实例并真正串到 fetch 路径
+    // 之前是死代码（0 调用者）。现在它每次 fetch user_videos / search / comments 之前 wait
+    const channelRateLimits: ChannelRateLimitsConfig = {
+      search_qps: (channels as { channel_rate_limits?: { douyin?: { search_qps?: number } } }).channel_rate_limits?.douyin?.search_qps ?? 1,
+      user_videos_qps: (channels as { channel_rate_limits?: { douyin?: { user_videos_qps?: number } } }).channel_rate_limits?.douyin?.user_videos_qps ?? 1,
+      comment_qps: (channels as { channel_rate_limits?: { douyin?: { comment_qps?: number } } }).channel_rate_limits?.douyin?.comment_qps ?? 1,
+      friend_request_per_day: 5,
+      dm_per_day: 10,
+    };
+    rateLimiter = RateLimiter.fromConfig({
+      channelLimits: channelRateLimits,
+      adapterLimits: { search_per_hour: 0, user_videos_per_hour: 0, comment_per_hour: 0, friend_request_per_day: 0, dm_per_day: 0 },
+    });
+
+    // P0-A #2 修复：构造 LLM CircuitBreaker
+    // 阈值 3 次失败 → OPEN 60s。OPEN 时 onOpen 发 critical notifier
+    // P0-A #2 完成接线：把 breaker 注入到 batchCtx，让 batch.ts 的 fetcher 闭包用 breaker.exec()
+    llmBreaker = new CircuitBreaker({
+      name: 'llm',
+      failureThreshold: 3,
+      cooldownMs: 60_000,
+      onOpen: (state) => {
+        currentLog.error({ state }, 'LLM 熔断器打开 — 后续 LLM 调用会立即 reject');
+        // 走默认 notifier 通道发 critical（异步，不抛）
+        getNotifier('feishu').send({
+          title: '[探星] LLM 熔断',
+          body: 'LLM 连续失败 ≥ 3 次，熔断器打开 60s。',
+          level: 'critical',
+        }).catch((err: unknown) => {
+          currentLog.warn({ err: String(err) }, '熔断告警发送失败');
+        });
+      },
+    });
+
     if (mode === 'sec_uid' || mode === 'both') {
       await updateStep(0, 'running');
-      const result = await fetchViaSecUid(channels, knowledgeDir, opts);
+      const result = await fetchViaSecUid(channels, knowledgeDir, opts, channelName, rateLimiter);
       comments.push(...result.comments);
       videosScanned += result.videos;
     }
 
     if (mode === 'keyword' || mode === 'both') {
       await updateStep(0, 'running');
-      const result = await fetchViaKeyword(channels, knowledgeDir, opts);
+      const result = await fetchViaKeyword(channels, knowledgeDir, opts, channelName, rateLimiter);
       comments.push(...result.comments);
       videosScanned += result.videos;
     }
 
-    log.info({ comments: comments.length, videos: videosScanned }, '收集评论');
+    currentLog.info({ comments: comments.length, videos: videosScanned }, '收集评论');
     await updateStep(0, 'completed', { comments, videosScanned });
     stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
   } catch (e) {
@@ -296,7 +367,7 @@ async function runDailyBody(
 
   // 4. 预处理（去重 / 过滤）
   const filtered = preprocessComments(comments, channels);
-  log.info({ filtered: filtered.length }, '过滤评论');
+  currentLog.info({ filtered: filtered.length }, '过滤评论');
   await updateStep(1, 'completed', { filtered: filtered.length });
 
   // 5. LLM 意图分析
@@ -328,6 +399,10 @@ async function runDailyBody(
         hookStyle,
         costTracker,
         modelName: profile.llm.model,
+        // P0-A #3 修复：从 profile.llm.fallback 解析 fallback LLM 列表
+        fallbackLLMs: await loadFallbackLLMs(profile),
+        // P0-A #2 修复：把 LLM CircuitBreaker 注入 fetcher 闭包
+        breaker: llmBreaker,
       };
       const batchSize = 10;
       for (let i = 0; i < filtered.length; i += batchSize) {
@@ -351,15 +426,17 @@ async function runDailyBody(
     // filtered.length === 0 → analysis 跳过，但也记 0 耗时
     stepDurations['analysis'] = Date.now() - stepStart_analysis;
   }
-  log.info({ leads: leads.length }, '生成 lead');
+  currentLog.info({ leads: leads.length }, '生成 lead');
 
   // 5.5 RAG 钩子生成（§3.4 / §3.7 步骤 [1.6]）
   // 用知识库 + 反馈驱动风格替换 intent analyzer 生成的通用钩子
   if (leads.length > 0) {
     try {
       const { getEmbedding } = await import('../adapters/registry.js');
-      // 默认用国产通义（Q1 切换）；如果用户只配了 OPENAI_API_KEY 会在 getEmbedding 里 fail-loud 报错
-      const embeddingProvider = getEmbedding('qwen');
+      // P0-E 修复：embedding provider 来自 profile.embedding.provider，默认 'qwen'
+      // 如果用户只配了 OPENAI_API_KEY 会在 getEmbedding 里 fail-loud 报错
+      const embeddingName = profile?.embedding?.provider ?? 'qwen';
+      const embeddingProvider = getEmbedding(embeddingName);
       const { generateHook } = await import('../rag/hook-generator.js');
 
       let ragSuccess = 0;
@@ -386,7 +463,7 @@ async function runDailyBody(
             try {
               await ragCrm.updateLeadFields(lead.cid, { hook_style: replyResult.hookStyle });
             } catch (e) {
-              log.warn({ cid: lead.cid, err: String(e) }, 'hook_style 写回 CRM 失败');
+              currentLog.warn({ cid: lead.cid, err: String(e) }, 'hook_style 写回 CRM 失败');
             }
           }
           ragSuccess++;
@@ -394,10 +471,10 @@ async function runDailyBody(
           // 单个 lead RAG 失败不影响其他，保留 intent analyzer 的钩子
         }
       }
-      log.info({ success: ragSuccess, total: leads.length }, 'RAG 钩子生成');
+      currentLog.info({ success: ragSuccess, total: leads.length }, 'RAG 钩子生成');
     } catch {
       // embedding adapter 未注册 → 冷启动，跳过 RAG，保留 intent analyzer 的钩子
-      log.info('RAG 跳过（embedding adapter 未配置）');
+      currentLog.info('RAG 跳过（embedding adapter 未配置）');
     }
   }
 
@@ -411,7 +488,7 @@ async function runDailyBody(
     try {
       const crm = await createCRM(profile);
       const syncResult = await crm.syncLeads(leads);
-      log.info({ synced: syncResult.synced, failed: syncResult.failed }, 'CRM 同步');
+      currentLog.info({ synced: syncResult.synced, failed: syncResult.failed }, 'CRM 同步');
       if (syncResult.failed > 0) {
         syncResult.errors.forEach(e => errors.push(`[crm] ${e.cid}: ${e.error}`));
       }
@@ -452,7 +529,7 @@ async function runDailyBody(
       await mkdir(dirname(tasksPath), { recursive: true });
       const { writeFile } = await import('node:fs/promises');
       await writeFile(tasksPath, JSON.stringify(tasks, null, 2), 'utf-8');
-      log.info({ count: tasksCount, path: tasksPath }, '生成任务');
+      currentLog.info({ count: tasksCount, path: tasksPath }, '生成任务');
       await updateStep(3, 'completed', { tasksCount });
       stepDurations['task_generation'] = Date.now() - stepStart_taskgen;
     } catch (e) {
@@ -482,7 +559,7 @@ async function runDailyBody(
       const execFn = opts.injectExecuteTasks ?? executeTasks;
       executionResults = await execFn(tasks, safety, { crm: execCrm });
       tasksExecuted = executionResults.length;
-      log.info({ executed: tasksExecuted, total: tasksCount }, '任务执行');
+      currentLog.info({ executed: tasksExecuted, total: tasksCount }, '任务执行');
     } catch (e) {
       executionHadError = true;
       errors.push(`任务执行失败：${e instanceof Error ? e.message : String(e)}`);
@@ -507,7 +584,7 @@ async function runDailyBody(
       // 生成并推送转化日报
       const report = await generateDailyReport(date, convOpts);
       await pushDailyReport(report);
-      log.info({
+      currentLog.info({
         new_leads: report.new_leads,
         new_wechat_added: report.new_wechat_added,
         new_bookings: report.new_bookings,
@@ -531,13 +608,15 @@ async function runDailyBody(
   }
 
   // -------------------------------------------------------------------------
-  // Step 6: notification
+  // Step 5: notification
   // Phase 0 PR 1：已包局部 try/catch，加 stepDurations
   // -------------------------------------------------------------------------
   await updateStep(5, 'running');
   const stepStart_notif = Date.now();
   try {
-    const notifier = getNotifier('console');
+    // P0-E 修复：notifier 来自 profile.notifier.default，默认 'console'
+    const notifierName = profile?.notifier?.default ?? 'console';
+    const notifier = getNotifier(notifierName);
     const modeNote = opts.mode === 'read-only' ? '\n🔒 模式：read-only（已跳过任务执行）' : '';
     await notifier.send({
       title: `✨ 探星早报 ${date}`,
@@ -550,6 +629,28 @@ async function runDailyBody(
     errors.push(`通知失败：${e instanceof Error ? e.message : String(e)}`);
     await updateStep(5, 'failed', undefined, String(e));
     stepDurations['notification'] = Date.now() - stepStart_notif;
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 6: health_check (P0-F 修复：之前 step 6 永远 pending)
+  // 跑一次轻量健康检查作为本次 run 的「关门检查」
+  // -------------------------------------------------------------------------
+  await updateStep(6, 'running');
+  const stepStart_health = Date.now();
+  try {
+    const healthResult = await checkAll();
+    await updateStep(6, 'completed', {
+      status: healthResult.status,
+      checksCount: healthResult.checks.length,
+    });
+    stepDurations['health_check'] = Date.now() - stepStart_health;
+    if (healthResult.status === 'critical' || healthResult.status === 'error') {
+      errors.push(`健康检查：${healthResult.summary}`);
+    }
+  } catch (e) {
+    errors.push(`健康检查失败：${e instanceof Error ? e.message : String(e)}`);
+    await updateStep(6, 'failed', undefined, String(e));
+    stepDurations['health_check'] = Date.now() - stepStart_health;
   }
 
   const result: RunDailyResult = {
@@ -571,7 +672,25 @@ async function runDailyBody(
   phaseCounts.tasks_executed = result.tasksExecuted;
 
   await markComplete(true);
-  log.info({ duration_ms: result.duration_ms, errors: errors.length }, '完成');
+  currentLog.info({ duration_ms: result.duration_ms, errors: errors.length }, '完成');
+
+  // P0-A #4 修复：feedback 回路接通 — applyOutcomeFeedback 把 outcomes.jsonl
+  // 里的转化/流失数据写回 channels.yaml 的 personas[].value_score。
+  // 失败时仅 log warn，不阻塞主流程（与 feedback-applier 自身 fail-loud 设计一致）。
+  if (!opts.dryRun) {
+    try {
+      const { applyOutcomeFeedback } = await import('../modules/feedback-applier/index.js');
+      const fbResult = await applyOutcomeFeedback({ businessDir: opts.businessDir });
+      currentLog.info({
+        loaded: fbResult.outcomes_loaded,
+        updated: fbResult.personas_updated,
+        skipped: fbResult.skipped,
+      }, '反馈回路：persona value_score 已更新');
+    } catch (e) {
+      currentLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'feedback-applier 失败（不影响主流程）');
+    }
+  }
+
   return result;
 }
 
@@ -583,22 +702,27 @@ async function fetchViaSecUid(
   channels: import('../core/types.js').ChannelsConfig,
   _knowledgeDir: string,
   _opts: RunDailyOptions,
+  channelName: string,
+  rateLimiter: RateLimiter,
 ): Promise<{ comments: Comment[]; videos: number }> {
   const secUids = channels.target_sec_uids?.sec_uids ?? [];
   const userLimit = channels.target_sec_uids?.user_videos_limit ?? 20;
   const commentLimit = channels.target_sec_uids?.comment_limit ?? 10;
 
   if (secUids.length === 0) {
-    log.warn('sec_uid 模式但 channels.yaml 里 sec_uids 为空，跳过');
+    currentLog.warn('sec_uid 模式但 channels.yaml 里 sec_uids 为空，跳过');
     return { comments: [], videos: 0 };
   }
 
-  const channel = getChannel('douyin');
+  // P0-E 修复：channel 名由调用方传入（来自 profile.channel.name）
+  const channel = getChannel(channelName);
   const comments: Comment[] = [];
   let videos = 0;
 
   for (const secUid of secUids) {
     try {
+      // P0-A #1 修复：channel.getUserVideos 之前 wait（节流）
+      await rateLimiter.waitForUserVideos();
       const userVideos = await channel.getUserVideos(secUid, {
         limit: userLimit,
         withComments: true,
@@ -622,7 +746,7 @@ async function fetchViaSecUid(
         }
       }
     } catch (e) {
-      log.warn({ err: e, secUid }, 'KOL 拉取失败');
+      currentLog.warn({ err: e, secUid }, 'KOL 拉取失败');
     }
   }
   return { comments, videos };
@@ -636,6 +760,8 @@ async function fetchViaKeyword(
   channels: import('../core/types.js').ChannelsConfig,
   _knowledgeDir: string,
   _opts: RunDailyOptions,
+  channelName: string,
+  rateLimiter: RateLimiter,
 ): Promise<{ comments: Comment[]; videos: number }> {
   const keywords = channels.search?.keywords ?? {};
   const limit = channels.search?.limit_per_keyword ?? 10;
@@ -644,16 +770,19 @@ async function fetchViaKeyword(
     return { comments: [], videos: 0 };
   }
 
-  const channel = getChannel('douyin');
+  // P0-E 修复：channel 名由调用方传入（来自 profile.channel.name）
+  const channel = getChannel(channelName);
   const comments: Comment[] = [];
   const videos: import('../core/types.js').Video[] = [];
 
   for (const [kw, _weight] of Object.entries(keywords)) {
     try {
+      // P0-A #1 修复：channel.search 之前 wait（节流）
+      await rateLimiter.waitForSearch();
       const result = await channel.search({ keywords: [kw], limit });
       videos.push(...result);
     } catch (e) {
-      log.warn({ err: e, keyword: kw }, '关键词搜索失败');
+      currentLog.warn({ err: e, keyword: kw }, '关键词搜索失败');
     }
   }
 
@@ -664,6 +793,8 @@ async function fetchViaKeyword(
   for (const v of videos) {
     if (!v.aweme_id) continue;
     try {
+      // P0-A #1 修复：拉评论之前 wait（节流）
+      await rateLimiter.waitForComment();
       const videoComments = await douyinChannel.getVideoComments(v.aweme_id, 10);
       for (const c of videoComments) {
         comments.push({
@@ -695,7 +826,7 @@ async function fetchViaKeyword(
         });
       }
     } catch (e) {
-      log.warn({ err: e, aweme_id: v.aweme_id }, '拉评论失败，用视频描述 fallback');
+      currentLog.warn({ err: e, aweme_id: v.aweme_id }, '拉评论失败，用视频描述 fallback');
       comments.push({
         cid: `${v.aweme_id}-desc-fallback`,
         aweme_id: v.aweme_id,
@@ -779,9 +910,30 @@ async function loadAndResolveNotifiers(opts: RunDailyOptions): Promise<Notifier[
     const loaded = await loadBusinessProfile(opts.businessDir);
     return (opts.injectResolveNotifiers ?? defaultResolveNotifiers)(loaded.profile);
   } catch (e) {
-    log.warn({ err: e instanceof Error ? e.message : String(e) }, '加载 profile 失败，告警跳过');
+    currentLog.warn({ err: e instanceof Error ? e.message : String(e) }, '加载 profile 失败，告警跳过');
     return [];
   }
+}
+
+/**
+ * P0-A #3 修复：从 profile.llm.fallback 解析出 fallback LLM 实例列表
+ * 主 LLM 失败时按此顺序尝试。fallback provider 未注册时跳过并 log warn。
+ */
+async function loadFallbackLLMs(
+  profile: import('../core/types.js').BusinessProfile,
+): Promise<Array<{ name: string; llm: { complete(prompt: string): Promise<string> } }>> {
+  if (!profile.llm.fallback || profile.llm.fallback.length === 0) return [];
+  const { getLLM } = await import('../adapters/registry.js');
+  const out: Array<{ name: string; llm: { complete(prompt: string): Promise<string> } }> = [];
+  for (const fb of profile.llm.fallback) {
+    try {
+      const llm = getLLM(fb.provider);
+      out.push({ name: `${fb.provider}/${fb.model}`, llm });
+    } catch (e) {
+      currentLog.warn({ provider: fb.provider, err: String(e) }, 'fallback LLM 未注册，跳过');
+    }
+  }
+  return out;
 }
 
 /**
@@ -795,7 +947,7 @@ async function sendWithTimeout(n: Notifier, message: Parameters<Notifier['send']
       new Promise((_, reject) => setTimeout(() => reject(new Error('notifier.send timeout')), 10_000)),
     ]);
   } catch (e) {
-    log.error(
+    currentLog.error(
       { notifier: n.name, err: e instanceof Error ? e.message : String(e) },
       'notifier.send 失败/超时',
     );

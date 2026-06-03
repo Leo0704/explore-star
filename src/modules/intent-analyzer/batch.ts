@@ -75,6 +75,17 @@ export interface BatchContext {
    * 生产环境由 run-daily 注入 profile.llm.model
    */
   modelName?: string;
+  /**
+   * P0-A #3 修复：fallback LLM 链（来自 profile.llm.fallback）
+   * 主 LLM 失败时按顺序尝试；全部失败才报 reject。
+   */
+  fallbackLLMs?: Array<{ name: string; llm: { complete(prompt: string): Promise<string> } }>;
+  /**
+   * P0-A #2 修复：LLM CircuitBreaker（之前 run-daily 构造但 0 真实接线）
+   * fetcher 闭包用 breaker.exec(() => llm.complete(...)) 包装。
+   * 连续 3 次失败 → OPEN 60s，期间所有 LLM 调用立即 reject。
+   */
+  breaker?: { exec<T>(fn: () => Promise<T>): Promise<T> };
 }
 
 export type BatchRejectedItem = { cid: string; reason: string; raw?: string };
@@ -129,12 +140,41 @@ export async function analyzeBatch(
       systemPrompt: `${systemPrompt}${hookStyleHint}`,
       userPrompt,
       fetcher: async () => {
-        const r = await llm.complete(fullPrompt);
-        // cache miss 时记 token;cache hit 时 fetcher 根本不被调
-        if (ctx.costTracker) {
-          ctx.costTracker.recordUsage(fullPrompt, r);
+        // P0-A #2 + #3 修复：用 CircuitBreaker 包住主 LLM 调用，
+        // 失败时按 fallback 链顺序试下一个。
+        const tryLlm = async (provider: { complete(p: string): Promise<string> }, name: string): Promise<string> => {
+          try {
+            return await provider.complete(fullPrompt);
+          } catch (e) {
+            throw new Error(`[${name}] ${e instanceof Error ? e.message : String(e)}`);
+          }
+        };
+
+        // P0-A #2：breaker 包装主 LLM
+        const exec = ctx.breaker
+          ? <T>(fn: () => Promise<T>) => ctx.breaker!.exec(fn)
+          : <T>(fn: () => Promise<T>) => fn();
+        let primaryError: Error | null = null;
+        try {
+          const r = await exec(() => tryLlm(llm, 'primary'));
+          if (ctx.costTracker) ctx.costTracker.recordUsage(fullPrompt, r);
+          return r;
+        } catch (e) {
+          primaryError = e as Error;
         }
-        return r;
+        // fallback 链：按顺序试
+        if (ctx.fallbackLLMs && ctx.fallbackLLMs.length > 0) {
+          for (const fb of ctx.fallbackLLMs) {
+            try {
+              const r = await tryLlm(fb.llm, `fallback:${fb.name}`);
+              if (ctx.costTracker) ctx.costTracker.recordUsage(fullPrompt, r);
+              return r;
+            } catch (e) {
+              // 继续试下一个 fallback
+            }
+          }
+        }
+        throw primaryError ?? new Error('LLM 调用失败（无 fallback 可用）');
       },
     });
   } catch (e) {

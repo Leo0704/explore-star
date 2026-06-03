@@ -107,6 +107,10 @@ export async function loadBusinessProfile(businessDir: string): Promise<LoadedBu
   const promptsDir = profile.prompts_dir || join(businessDir, 'prompts');
   const knowledgeDir = profile.knowledge_dir || join(businessDir, 'knowledge');
 
+  // P0-J 修复：加载 crm.yaml（field_mapping / persona_options / status_options）
+  // 业务方过去改 crm.yaml 实际不生效，原因是没人读它。现在 merge 进 profile.crm。
+  await mergeCrmYaml(businessDir, profile);
+
   return {
     businessDir,
     profile,
@@ -115,4 +119,54 @@ export async function loadBusinessProfile(businessDir: string): Promise<LoadedBu
     promptsDir,
     knowledgeDir,
   };
+}
+
+/**
+ * 加载 crm.yaml（如果存在），把其字段合并进 profile.crm。
+ *
+ * 设计：
+ *   - crm.yaml 是 crm 专属配置文件（field_mapping / persona_options / status_options 等）
+ *   - profile.yaml 里 crm.type / crm.config.app_id_env 等基础字段也保留
+ *   - crm.yaml 不存在时静默跳过（crm 配置完全来自 profile.yaml）
+ *
+ * 冲突处理：crm.yaml 与 profile.yaml 都有 crm.type 时，必须一致，否则抛错。
+ */
+async function mergeCrmYaml(businessDir: string, profile: BusinessProfile): Promise<void> {
+  const crmPath = join(businessDir, 'crm.yaml');
+  let crmRaw: string;
+  try {
+    crmRaw = await readFile(crmPath, 'utf-8');
+  } catch {
+    return; // crm.yaml 可选
+  }
+
+  let parsed: { crm?: { type?: string; config?: Record<string, unknown> } };
+  try {
+    parsed = yaml.parse(crmRaw) ?? {};
+  } catch (e) {
+    throw new Error(`crm.yaml 解析失败：${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const crmBlock = parsed.crm;
+  if (!crmBlock) return;
+
+  // 冲突检测：crm.type 必须与 profile.yaml 一致
+  if (crmBlock.type && crmBlock.type !== profile.crm.type) {
+    throw new Error(
+      `crm.yaml 与 profile.yaml 的 crm.type 冲突：crm.yaml=${crmBlock.type}, profile.yaml=${profile.crm.type}`,
+    );
+  }
+
+  // 把 crm.config 里的字段合并进 profile.crm.config
+  if (crmBlock.config) {
+    for (const [k, v] of Object.entries(crmBlock.config)) {
+      // field_mapping 提到顶层（与 CRMConfig 类型一致）
+      if (k === 'field_mapping' && v && typeof v === 'object') {
+        (profile.crm as { field_mapping?: Record<string, string> }).field_mapping =
+          v as Record<string, string>;
+      } else {
+        (profile.crm.config as Record<string, unknown>)[k] = v;
+      }
+    }
+  }
 }

@@ -10,19 +10,18 @@ import type { Lead } from '../../core/types.js';
 // 拒绝信号词列表
 // ---------------------------------------------------------------------------
 
-// 4+ 字中文：子串匹配即可（误报风险低）
+// 特异性高的中文信号词：子串匹配即可（误报风险低）
 const REJECT_SIGNALS_EXACT = [
-  '不需要',
+  '不需要', '别发了', '别再发', '拉黑', '没兴趣', '不用了',
 ];
 
-// 短中文（≤3 字）+ 英文：必须 word-boundary 匹配
-// 避免 "stop" 子串误中 "unstoppable"，"不要" 误中相邻短语
+// 容易误中的短词 + 英文：必须 word-boundary 匹配
+// "不要" 误中 "我还要不要买"；"stop" 误中 "unstoppable"
 const REJECT_SIGNALS_BOUNDARY = [
-  '别发了', '别再发', '拉黑', '不要', '没兴趣', '不用了',
-  'stop', 'unsubscribe',
+  '不要', 'stop', 'unsubscribe',
 ];
 const REJECT_SIGNAL_BOUNDARY_REGEX = new RegExp(
-  `(?:^|\\b)(${REJECT_SIGNALS_BOUNDARY.join('|')})(?:$|\\b)`,
+  `(?:^|(?<=[^\\u4e00-\\u9fff]))(${REJECT_SIGNALS_BOUNDARY.join('|')})(?=$|(?=[^\\u4e00-\\u9fff]))`,
   'i',
 );
 

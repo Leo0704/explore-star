@@ -40,16 +40,6 @@ async function humanDelay(minMs: number, maxMs: number): Promise<void> {
   await new Promise(r => setTimeout(r, ms));
 }
 
-/** 模拟人类打字：逐字输入，每字 100-300ms 随机 */
-async function humanType(page: any, selector: string, text: string): Promise<void> {
-  await page.click(selector);
-  await humanDelay(500, 1500);
-  for (const char of text) {
-    await page.evaluate(`document.querySelector('${selector}').textContent += ${JSON.stringify(char)}`);
-    await humanDelay(100, 300);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // BrowserBridge 懒加载
 // ---------------------------------------------------------------------------
@@ -85,7 +75,7 @@ async function detectRisk(page: any): Promise<RiskSignal | null> {
   const hasRisk = await page.evaluate(`(() => {
     const text = document.body?.innerText || '';
     if (/验证码|captcha|slider|verify/i.test(text)) return 'captcha';
-    if (/登录|login|sign.?in/i.test(text)) return 'account_ban';
+    if (/账号.*封|封禁|suspended|banned|永久限制/i.test(text)) return 'account_ban';
     return null;
   })()`);
   return hasRisk ? createRiskSignal(hasRisk) : null;
@@ -164,32 +154,14 @@ export async function commentReply(videoUrl: string, text: string): Promise<{ ok
     await humanDelay(1000, 3000);
 
     // 点击评论输入框（.public-DraftEditor-content）
-    await page.evaluate(`(() => {
-      const editor = document.querySelector('.public-DraftEditor-content');
-      if (editor) editor.click();
-    })()`);
+    await page.click('.public-DraftEditor-content');
     await humanDelay(500, 1500);
 
-    // 逐字输入（模拟人类打字）
+    // 逐字输入（模拟人类打字，触发真实键盘事件）
     for (const char of text) {
-      await page.evaluate(`(() => {
-        const editor = document.querySelector('.public-DraftEditor-content');
-        if (editor) {
-          // 触发 React 的 input 事件
-          const event = new Event('input', { bubbles: true });
-          editor.dispatchEvent(event);
-        }
-      })()`);
+      await page.type('.public-DraftEditor-content', char, { delay: 0 });
       await humanDelay(100, 300);
     }
-    // 用 page.type 真实输入
-    await page.evaluate(`(() => {
-      const editor = document.querySelector('.public-DraftEditor-content');
-      if (editor) {
-        editor.textContent = ${JSON.stringify(text)};
-        editor.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    })()`);
     await humanDelay(1000, 3000);
 
     // 点击红色箭头发送按钮（.FbVIhLlK.Law8JZNu）
@@ -314,7 +286,7 @@ export async function executeBrowserAction(
     executed_at: new Date().toISOString(),
   };
 
-  if (task.next_action === 'send_material') return baseResult;
+  if (task.next_action === 'send_material') return { ...baseResult, result: 'skipped' };
 
   const videoUrl = task.video_url;
   const userSecUid = task.user_sec_uid;

@@ -37,6 +37,17 @@ export interface BusinessProfile {
   llm: LLMConfig;
   crm: CRMConfig;
 
+  // P0-E 修复：channel/embedding/notifier 改为 profile 驱动，告别硬编码
+  channel?: {
+    name: string;             // 默认 'douyin'，多 channel 时代改 'xiaohongshu' 等
+  };
+  embedding?: {
+    provider: string;         // 默认 'qwen'，可改 'openai'
+  };
+  notifier?: {
+    default?: string;         // 默认 'console'，可改 'feishu'
+  };
+
   hook_config?: {
     style?: string;          // 默认「朋友推荐，不像销售」
     max_length?: number;     // 默认 30

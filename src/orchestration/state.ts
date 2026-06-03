@@ -1,22 +1,29 @@
 /**
- * 状态管理（断点续传 data/state.json）
+ * 状态管理（data/state.json）
  *
  * V1.4 实现：
- *   - loadState / saveState: 读写断点状态
+ *   - loadState / saveState: 读写状态
  *   - updateStep: 更新当前步骤
  *   - markComplete: 标记步骤完成
- *   - getResumePoint: 获取恢复点
+ *   - withStateLock: load-modify-save 互斥（proper-lockfile）
  *
  * Y3 并发安全：
  *   - 用 proper-lockfile 给 data/state.json 加进程间互斥锁
  *   - 锁文件位于 data/.state.json.lock（不与 state.json 同名避免污染备份）
  *   - 30 秒内获取不到锁直接抛错，不做指数退避
+ *
+ * 注：V1.4 未实现「断点续传」（即 state.json 标记 currentStep 后下次 run 跳过已完成步骤）。
+ * 原因是跨日 / 跨小时的 step 收尾可能涉及外部副作用（CRM 写、notifier 发），
+ * 重跑更难审计。如果需要重启用 `--force-restart` 重置 state。
  */
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import lockfile from 'proper-lockfile';
+import { logger } from '../core/logger.js';
+
+const log = logger.child({ module: 'state' });
 
 export interface PipelineState {
   date: string;
@@ -118,8 +125,8 @@ async function loadStateUnlocked(): Promise<PipelineState> {
       const raw = await readFile(STATE_FILE, 'utf-8');
       if (raw) return JSON.parse(raw) as PipelineState;
     }
-  } catch {
-    // 解析失败或读失败，落到空白
+  } catch (e) {
+    log.warn({ err: e instanceof Error ? e.message : String(e) }, 'state.json 解析失败，重置为空白状态');
   }
   return createEmptyState();
 }

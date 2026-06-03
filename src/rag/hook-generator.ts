@@ -18,6 +18,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BusinessProfile, Lead, EmbeddingProvider } from '../core/types.js';
 import { getLLM } from '../adapters/registry.js';
+// P0-G 修复：hook-generator 也接 completeWithCache，重复 lead 不重复扣费
+import { completeWithCache } from '../adapters/llm/_cache.js';
 import { compileHookPrompt } from '../modules/intent-analyzer/prompts-loader.js';
 import { selectBestHookStyle } from '../modules/nurture-engine/feedback-loader.js';
 import { retrieveTopK, type RetrievedDoc } from './retriever.js';
@@ -99,10 +101,22 @@ export async function generateHook(
     hook_config: hookConfig,
   });
 
-  // 5. 调用 LLM
+  // 5. 调用 LLM（带 cache —— 同一 lead 多次跑 hook-generator 不重复扣费）
   const llm = getLLM(profile.llm.provider);
   const maxLength = (profile.hook_config?.max_length ?? 30) * 2; // 2 倍截断
-  const output = await llm.complete(prompt, { temperature: 0.7, maxTokens: 200 });
+  // P0-G：把单字符串 prompt 拆为 system（业务身份/风格）+ user（lead + 知识库）
+  // 简单实现：前 1 段作为 system，其余作为 user。模板里有 "你是「{{business.name}}」" 这种开局。
+  const systemMarker = '你是';
+  const systemPrompt = prompt.startsWith(systemMarker)
+    ? prompt.split('\n\n')[0]
+    : `你是「${profile.business.name}」的获客写手`;
+  const userPrompt = prompt.startsWith(systemMarker) ? prompt.split('\n\n').slice(1).join('\n\n') : prompt;
+  const output = await completeWithCache({
+    model: profile.llm.model,
+    systemPrompt,
+    userPrompt,
+    fetcher: async () => llm.complete(prompt, { temperature: 0.7, maxTokens: 200 }),
+  });
   // Bug 62: 按 codepoint 截断,避免 .slice 在 UTF-8 代理对/组合字符中间切断
   const hook = Array.from(output.trim()).slice(0, maxLength).join('');
 

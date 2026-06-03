@@ -37,7 +37,7 @@ export async function pushMaterial(
   if (elapsed < delayMs) {
     return { pushed: false, reason: `未到 ${delayMs / 3600000}h 延迟（已 ${(elapsed / 3600000).toFixed(1)}h）` };
   }
-  if (lead.status !== '已加微' && lead.status !== '已加好友') {
+  if (!['已加微', '已加好友', '已私信'].includes(lead.status)) {
     return { pushed: false, reason: `状态已变更为 ${lead.status}，不再推送物料` };
   }
   if (!opts.conversion.post_add_asset) {
@@ -45,8 +45,17 @@ export async function pushMaterial(
   }
 
   // 推送物料
-  const notifier = getNotifier('console'); // V1.4 暂用 console
+  // P0-B 修复：V1.4 真实 PDF 推送通道未实现，对 PDF 类型 fail-loud。
+  // link / image 类型走 text notifier（仅发文字描述）。
   const asset = opts.conversion.post_add_asset;
+  if (asset?.type === 'pdf') {
+    throw new Error(
+      `V1.4 不支持 PDF 推送（业务方配了 post_add_asset.type="pdf"，name="${asset.name}"）。` +
+      `请改用 type: "link" + 消息里附 URL，或接入 MaterialDeliveryAdapter（v2 路线）。`,
+    );
+  }
+  const notifierName = opts.profile.notifier?.default ?? 'console';
+  const notifier = getNotifier(notifierName);
   const message = buildMessage(lead, opts.conversion);
 
   await notifier.send({
@@ -56,14 +65,15 @@ export async function pushMaterial(
   });
 
   // 记录触达事件（F12：用于 §3.10 触达方式归因回路）
+  // P0-B 修复：touchpoint_channel 用实际 notifier 名（不再是 'console'）
   const action_type = `send_${asset?.type ?? 'asset'}`;
   await recordEvent({
     event: 'touchpoint_sent',
     cid: lead.cid,
     touchpoint_type: action_type,
-    touchpoint_channel: 'console',
+    touchpoint_channel: notifierName,
     keyword: action_type,
-    hook_style: 'console',
+    hook_style: notifierName,
     hook_text: `推送物料「${asset?.name ?? ''}」`,
     persona: '',
     interaction_time: new Date().toISOString(),

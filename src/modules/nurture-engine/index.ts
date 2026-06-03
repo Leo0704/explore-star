@@ -31,9 +31,6 @@ export interface NurtureEngineOptions {
   insights?: WeeklyInsights | null;
 }
 
-const STATE_ORDER: LeadStatus[] = [
-  '新发现', '已关注', '已互动', '已加好友', '已加微', '已预约', '已成交',
-];
 
 // ---------------------------------------------------------------------------
 // 主入口：生成每日任务
@@ -68,13 +65,11 @@ export function generateDailyTasks(
   for (const lead of sortedLeads) {
     if (tasks.length >= limit) break;
 
-    // 1. 检查互动感知（§3.6.2）— 委托给 checkAbandonment（§3.6.3）覆盖 opt_out + 被拒 + 0 回应
+    // 1. 检查互动感知 + 智能放弃（§3.6.2 / §3.6.3）
+    // 统一由 checkAbandonment 处理：opt_out / 被拒 / 0 回应 / 沉默 / 60 天归档
     applyInteractionFeedback(lead, noRespLimit, dormantDays);
 
-    // 2. 检查智能放弃（§3.6.3）— 仅做沉默/60 天归档（opt_out + 0 回应已在上面处理）
-    applyAbandonmentLogic(lead, dormantDays);
-
-    // 3. 跳过终态
+    // 2. 跳过终态
     if (['已成交', '已流失'].includes(lead.status)) continue;
 
     // 4. 检查任务间隔
@@ -115,24 +110,6 @@ function applyInteractionFeedback(lead: Lead, noRespLimit: number, dormantDays: 
   }
 }
 
-// ---------------------------------------------------------------------------
-// §3.6.3 智能放弃判定（仅沉默 + 60 天归档；opt_out / 被拒 / 0 回应已在 §3.6.2 处理）
-// ---------------------------------------------------------------------------
-
-function applyAbandonmentLogic(lead: Lead, dormantDays: number): void {
-  // 沉默
-  const lastInt = lead.last_interaction_at || lead.wechat_added_at || lead.created_at;
-  const daysSince = (Date.now() - new Date(lastInt).getTime()) / (1000 * 60 * 60 * 24);
-  if (lead.status === '已加微' && daysSince > dormantDays) {
-    markStatus(lead, '沉默', `加微 ${Math.round(daysSince)} 天未互动`);
-    return;
-  }
-  // 60 天无任何动作 → 永久归档
-  const allDaysSince = (Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24);
-  if (allDaysSince > 60 && !['已成交', '已流失', '已再激活'].includes(lead.status)) {
-    markStatus(lead, '已流失', '60 天无动作');
-  }
-}
 
 // ---------------------------------------------------------------------------
 // §3.6.4 再激活
@@ -148,13 +125,15 @@ export function findReactivatableLeads(leads: Lead[], dormantDays: number = 30):
 }
 
 export function reactivate(lead: Lead): Task {
+  const hook = lead.suggested_dm_hook?.replace(/\{\{nickname\}\}/g, lead.nickname)
+    ?? `${lead.nickname}，上次聊的方案考虑得怎样？`;
   return {
     task_id: crypto.randomUUID(),
     lead_cid: lead.cid,
     nickname: lead.nickname,
     current_state: '沉默',
     next_action: 'dm',
-    hook: 'X 总，上次说的方案考虑得怎样？',
+    hook,
     hook_style: '轻量触达',
     priority: 'low',
     persona: lead.persona,

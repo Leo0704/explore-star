@@ -2,8 +2,14 @@
  * keyword-generator 单元测试
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { BusinessProfile, LLMProvider } from '../../src/core/types.js';
+// P0-G 修复：clearMemoryCache 清模块级缓存，否则测试间串味
+import { _clearMemoryCache } from '../../src/adapters/llm/_cache.js';
+
+beforeEach(() => {
+  _clearMemoryCache();
+});
 
 function makeProfile(): BusinessProfile {
   return {

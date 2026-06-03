@@ -36,7 +36,7 @@ export interface HealthCheckResult {
 export async function checkAll(businessDir?: string): Promise<HealthCheckResult> {
   const results = [
     await checkSystemHealth(),
-    await checkAdapterHealth(),
+    await checkAdapterHealth(businessDir),
     await checkSafetyLimits(businessDir),
     await checkEmergencyStop(),
   ];
@@ -117,7 +117,7 @@ export async function checkSystemHealth(): Promise<HealthCheckResult> {
 /**
  * §5.4.2 各 adapter 连通性
  */
-export async function checkAdapterHealth(): Promise<HealthCheckResult> {
+export async function checkAdapterHealth(businessDir?: string): Promise<HealthCheckResult> {
   const checks: HealthCheckResult['checks'] = [];
 
   // LLM 检查
@@ -132,17 +132,24 @@ export async function checkAdapterHealth(): Promise<HealthCheckResult> {
     checks.push({ name: 'llm', status: 'error', message: `LLM 检查失败：${e instanceof Error ? e.message : String(e)}` });
   }
 
-  // CRM 检查
+  // CRM 检查（从业务配置读取实际 CRM 类型）
+  let crmType = 'csv';
+  if (businessDir) {
+    try {
+      const { profile } = await loadBusinessProfile(businessDir);
+      crmType = profile.crm.type;
+    } catch { /* fallback csv */ }
+  }
   try {
-    const crm = getCRM('csv');
+    const crm = getCRM(crmType);
     if (crm) {
       const ok = await crm.ping();
-      checks.push({ name: 'crm', status: ok ? 'ok' : 'warning', message: ok ? 'CRM 连通正常' : 'CRM ping 失败' });
+      checks.push({ name: 'crm', status: ok ? 'ok' : 'warning', message: ok ? `CRM (${crmType}) 连通正常` : `CRM (${crmType}) ping 失败` });
     } else {
-      checks.push({ name: 'crm', status: 'warning', message: 'CRM 未配置' });
+      checks.push({ name: 'crm', status: 'warning', message: `CRM (${crmType}) 未配置` });
     }
   } catch (e) {
-    checks.push({ name: 'crm', status: 'error', message: `CRM 检查失败：${e instanceof Error ? e.message : String(e)}` });
+    checks.push({ name: 'crm', status: 'error', message: `CRM (${crmType}) 检查失败：${e instanceof Error ? e.message : String(e)}` });
   }
 
   // Channel 检查
@@ -218,11 +225,37 @@ export async function checkSafetyLimits(businessDir?: string): Promise<HealthChe
     details: { used: todayTasks, limit: maxTasks },
   });
 
+  // 好友申请 / 私信配额（从 rate-counters 文件读取）
+  const douyinLimits = (limits?.douyin as Record<string, number>) || {};
+  const countersPath = `./data/rate-counters-${today}.json`;
+  let counters = { friend_requests_today: 0, dm_today: 0 };
+  if (existsSync(countersPath)) {
+    try {
+      counters = JSON.parse(readFileSync(countersPath, 'utf-8'));
+    } catch { /* ignore */ }
+  }
+
+  const maxFriendReq = douyinLimits.friend_request_per_day ?? 20;
+  checks.push({
+    name: 'friend_requests',
+    status: counters.friend_requests_today < maxFriendReq ? 'ok' : 'critical',
+    message: `今日好友申请 ${counters.friend_requests_today}/${maxFriendReq}`,
+    details: { used: counters.friend_requests_today, limit: maxFriendReq },
+  });
+
+  const maxDm = douyinLimits.dm_per_day ?? 50;
+  checks.push({
+    name: 'dm_quota',
+    status: counters.dm_today < maxDm ? 'ok' : 'critical',
+    message: `今日私信 ${counters.dm_today}/${maxDm}`,
+    details: { used: counters.dm_today, limit: maxDm },
+  });
+
   const hasCritical = checks.some(c => c.status === 'critical');
   return {
     status: hasCritical ? 'critical' : checks.some(c => c.status === 'warning') ? 'warning' : 'ok',
     checks,
-    summary: `限速检查：${todayTasks}/${maxTasks} 任务`,
+    summary: `限速检查：${todayTasks}/${maxTasks} 任务，${counters.friend_requests_today}/${maxFriendReq} 好友，${counters.dm_today}/${maxDm} 私信`,
   };
 }
 

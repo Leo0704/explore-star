@@ -233,7 +233,9 @@ async function applyKeywordWeights(
 
 function getWeekStart(): string {
   const d = new Date();
-  d.setDate(d.getDate() - d.getDay()); // 周日
+  const day = d.getUTCDay(); // 0=周日
+  d.setUTCDate(d.getUTCDate() - day);
+  d.setUTCHours(0, 0, 0, 0);
   return d.toISOString().slice(0, 10);
 }
 
