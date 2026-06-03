@@ -19,13 +19,11 @@ import { logger } from '../../core/logger.js';
 export * from './outcomes-loader.js';
 export * from './moving-average.js';
 export * from './channels-writer.js';
-export * from './learned-examples.js';
 
 export interface FeedbackApplierOptions {
   businessDir: string;
   outcomesPath?: string;
   channelsPath?: string;
-  learnedCachePath?: string;
   now?: Date;
 }
 
@@ -43,7 +41,6 @@ export async function applyOutcomeFeedback(
   const t0 = Date.now();
   const outcomesPath = opts.outcomesPath ?? './data/feedback/outcomes.jsonl';
   const channelsPath = opts.channelsPath ?? join(opts.businessDir, 'channels.yaml');
-  const learnedCachePath = opts.learnedCachePath ?? './data/feedback/learned-examples.json';
   const now = opts.now ?? new Date();
 
   try {
@@ -77,11 +74,6 @@ export async function applyOutcomeFeedback(
     }));
 
     const writeR = await updatePersonaValueScores({ channelsPath, updates: valueUpdates });
-
-    // V1.4: learned-examples 暂时跳过 — LeadOutcomeEvent schema 当前不含
-    // comment_snippet / pain_point 字段，传空数组会污染 cache。等 schema
-    // 扩展或从其他源（CRM 备注、聊天记录）补齐数据后再接入。
-    // 保留 learnedCachePath 参数以便后续重新启用。
 
     return {
       outcomes_loaded: outcomes.length,

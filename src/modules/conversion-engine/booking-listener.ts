@@ -49,14 +49,3 @@ export async function watchBookings(
   }
 }
 
-/**
- * 手动触发一次预约同步（用于 cron 调用）
- * 注意：V1.4 的 BookingProvider 只有 watchBookings()（流式），没有 getUpcomingBookings()
- * 这里简化处理，只记录状态
- */
-export async function syncBookingsOnce(
-  _opts: BookingListenerOptions,
-): Promise<{ synced: number; errors: string[] }> {
-  // V1.4: 实时监听通过 watchBookings()，手动触发暂不支持
-  return { synced: 0, errors: [] };
-}

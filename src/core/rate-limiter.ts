@@ -15,14 +15,6 @@ import type { Notifier, RateLimits } from './types.js';
 
 const log = logger.child({ module: 'rate-limiter' });
 
-export class RateLimitHaltedError extends Error {
-  readonly code = 'RATE_LIMIT_HALTED' as const;
-  constructor(public resource: string) {
-    super(`Rate limit halted: ${resource} qps=0 (escalated, no more calls allowed)`);
-    this.name = 'RateLimitHaltedError';
-  }
-}
-
 export interface ChannelRateLimitsConfig {
   search_qps: number;
   user_videos_qps: number;
@@ -31,7 +23,7 @@ export interface ChannelRateLimitsConfig {
   dm_per_day: number;
 }
 
-export interface RateLimiterOptions {
+interface RateLimiterOptions {
   channelLimits: ChannelRateLimitsConfig;
   adapterLimits: RateLimits;
   notifier?: Notifier;
@@ -95,11 +87,11 @@ export class RateLimiter {
 
   private async waitWithQps(resource: QpsResource, qps: number): Promise<void> {
     if (this.haltedResources.has(resource)) {
-      throw new RateLimitHaltedError(resource);
+      throw new Error(`Rate limit halted: ${resource} qps=0 (escalated, no more calls allowed)`);
     }
     if (qps === 0) {
       this.haltedResources.add(resource);
-      throw new RateLimitHaltedError(resource);
+      throw new Error(`Rate limit halted: ${resource} qps=0 (escalated, no more calls allowed)`);
     }
     const minIntervalMs = 1000 / qps;
     const elapsed = Date.now() - this.lastCallMs[resource];

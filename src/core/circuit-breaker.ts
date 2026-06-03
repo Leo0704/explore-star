@@ -17,17 +17,9 @@ import { logger } from './logger.js';
 
 const log = logger.child({ module: 'circuit-breaker' });
 
-export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
-export class CircuitOpenError extends Error {
-  readonly code = 'CIRCUIT_OPEN' as const;
-  constructor(public breakerName: string) {
-    super(`Circuit breaker "${breakerName}" is OPEN`);
-    this.name = 'CircuitOpenError';
-  }
-}
-
-export interface CircuitBreakerOptions {
+interface CircuitBreakerOptions {
   name: string;
   failureThreshold: number;
   cooldownMs: number;
@@ -54,7 +46,7 @@ export class CircuitBreaker {
   async exec<T>(fn: () => Promise<T>): Promise<T> {
     this.maybeTransitionToHalfOpen();
     if (this.state === 'OPEN') {
-      throw new CircuitOpenError(this.opts.name);
+      throw new Error(`Circuit breaker "${this.opts.name}" is OPEN`);
     }
     try {
       const result = await fn();

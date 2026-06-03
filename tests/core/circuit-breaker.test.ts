@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { CircuitBreaker, CircuitOpenError } from '../../src/core/circuit-breaker.js';
+import { CircuitBreaker } from '../../src/core/circuit-breaker.js';
 
 describe('CircuitBreaker', () => {
   it('starts CLOSED and lets calls through', async () => {
@@ -31,9 +31,9 @@ describe('CircuitBreaker', () => {
     await expect(cb.exec(fail)).rejects.toThrow('boom');
     expect(cb.getState()).toBe('OPEN');
     expect(onOpen).toHaveBeenCalledWith('OPEN');
-    // OPEN 期间：exec() 抛 CircuitOpenError，且 fn 不被调
+    // OPEN 期间：exec() 抛 Error，且 fn 不被调
     const calls = vi.fn(fail);
-    await expect(cb.exec(calls)).rejects.toBeInstanceOf(CircuitOpenError);
+    await expect(cb.exec(calls)).rejects.toThrow('Circuit breaker "test" is OPEN');
     expect(calls).not.toHaveBeenCalled();
   });
 

@@ -152,7 +152,7 @@ export function listBookingProviders(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// 内置注册（V1.4 阶段：只注册 stub + douyin；具体实现在 Day 2-9 补全）
+// 内置注册（按环境变量条件注册所有已实现的 adapter）
 // ---------------------------------------------------------------------------
 export async function registerBuiltins(): Promise<void> {
   // 动态 import 避免循环依赖
@@ -318,17 +318,6 @@ export function getChannelDailyQuota(name: string): ChannelDailyQuota | null {
   const quota = _channelConfigCache?.channels?.[name]?.daily_quota;
   if (!quota) return null;
   return quota;
-}
-
-/**
- * 账号轮换 hook（**占位**）。1.x 之后实现真账号轮换。
- * 当前实现：直接返回 'default'。
- *
- * 不在 v1.x 实施：roadmap §2.5 显式禁单。
- */
-export function rotateAccount(_name: string): string {
-  log.warn({ channel: _name }, 'rotateAccount() 是 v1.x 占位，返回 default');
-  return 'default';
 }
 
 /**

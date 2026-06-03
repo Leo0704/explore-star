@@ -20,7 +20,7 @@ import { businessProfileSchema, formatZodError, ChannelRateLimitsSchema } from '
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export interface LoadedBusiness {
+interface LoadedBusiness {
   businessDir: string;
   profile: BusinessProfile;
   channels: ChannelsConfig;

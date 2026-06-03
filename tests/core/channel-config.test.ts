@@ -3,11 +3,11 @@
  *
  * 覆盖（roadmap §2.5）：
  *   - schema 类型导出存在
- *   - registry 暴露 getChannelQps / getChannelDailyQuota / rotateAccount
+ *   - registry 暴露 getChannelQps / getChannelDailyQuota
  *   - yaml 节点缺失时返回默认值（不阻塞）
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -136,36 +136,5 @@ describe('registry.getChannelDailyQuota', () => {
     const q = getChannelDailyQuota('douyin');
     expect(q?.by_action?.search).toBe(200);
     expect(q?.by_action?.comments).toBe(4000);
-  });
-});
-
-describe('registry.rotateAccount（占位）', () => {
-  it('返回 "default"（1.x 之后实现真账号轮换）', async () => {
-    const { rotateAccount } = await import('../../src/adapters/registry.js');
-    expect(rotateAccount('douyin')).toBe('default');
-  });
-
-  it('不同 channel 都返回 "default"（当前无差异化）', async () => {
-    const { rotateAccount } = await import('../../src/adapters/registry.js');
-    expect(rotateAccount('douyin')).toBe('default');
-    expect(rotateAccount('mock')).toBe('default');
-  });
-
-  it('调用时记 warn log（占位提醒）', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const loggerMod = await import('../../src/core/logger.js');
-    const origChild = loggerMod.logger.child;
-    const stubChild = vi.fn().mockReturnValue({ warn: warnSpy, info: vi.fn(), error: vi.fn(), debug: vi.fn() });
-    loggerMod.logger.child = stubChild as any;
-
-    try {
-      const { rotateAccount } = await import('../../src/adapters/registry.js?v=warn');
-      rotateAccount('douyin');
-      // 至少 warn 一次（占位提醒）
-      expect(warnSpy).toHaveBeenCalled();
-    } finally {
-      loggerMod.logger.child = origChild;
-      warnSpy.mockRestore();
-    }
   });
 });

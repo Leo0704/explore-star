@@ -10,6 +10,10 @@ logs/
 backups/
 *.log
 
+# Real business config (contains real sec_uid, API key env names)
+# business.example/ is tracked as template for new users
+business/
+
 # Emergency stop
 config/EMERGENCY_STOP
 

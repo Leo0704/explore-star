@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RateLimiter, RateLimitHaltedError } from '../../src/core/rate-limiter.js';
+import { RateLimiter } from '../../src/core/rate-limiter.js';
 import type { Notifier, NotificationMessage, SendResult, RateLimits } from '../../src/core/types.js';
 
 class SpyNotifier implements Notifier {
@@ -58,9 +58,9 @@ describe('RateLimiter', () => {
       notifier,
       sleep: noopSleep,
     });
-    await expect(rl.waitForSearch()).rejects.toBeInstanceOf(RateLimitHaltedError);
+    await expect(rl.waitForSearch()).rejects.toThrow(/Rate limit halted/);
     // 第二次也抛错（halted state 持续），但 notifier 只发 1 次
-    await expect(rl.waitForSearch()).rejects.toBeInstanceOf(RateLimitHaltedError);
+    await expect(rl.waitForSearch()).rejects.toThrow(/Rate limit halted/);
     expect(notifier.messages).toHaveLength(1);
     expect(notifier.messages[0].level).toBe('critical');
     expect(notifier.messages[0].title).toMatch(/停服|halt/i);
@@ -129,7 +129,7 @@ describe('RateLimiter', () => {
       notifier,
       sleep: noopSleep,
     });
-    await expect(rl.waitForUserVideos()).rejects.toBeInstanceOf(RateLimitHaltedError);
+    await expect(rl.waitForUserVideos()).rejects.toThrow(/Rate limit halted/);
     expect(notifier.messages.find(m => m.title?.includes('user_videos'))).toBeDefined();
   });
 });

@@ -16,7 +16,7 @@ import { dirname } from 'node:path';
 import type { Lead, LeadStatus, ConversionConfig, ConversionReport, BusinessProfile, CRMAdapter } from '../../core/types.js';
 import { getNotifier } from '../../adapters/registry.js';
 import { pushMaterial, generateConversionReport, pushConversionReport } from './material-pusher.js';
-import { watchBookings, syncBookingsOnce } from './booking-listener.js';
+import { watchBookings } from './booking-listener.js';
 import { findDormantLeads } from './dormant-finder.js';
 import { reactivateLead as doReactivate, reactivateDormantPool } from './reactivate.js';
 import { recordEvent } from '../feedback-analyzer/event-recorder.js';
@@ -98,7 +98,7 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
 // ---------------------------------------------------------------------------
 
 export { pushMaterial, generateConversionReport, generateConversionReport as generateDailyReport, pushConversionReport, pushConversionReport as pushDailyReport } from './material-pusher.js';
-export { watchBookings, syncBookingsOnce } from './booking-listener.js';
+export { watchBookings } from './booking-listener.js';
 export { findDormantLeads } from './dormant-finder.js';
 export { reactivateLead as reactivateLead, reactivateDormantPool } from './reactivate.js';
 

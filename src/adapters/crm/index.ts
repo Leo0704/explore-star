@@ -3,8 +3,6 @@
  */
 import { CsvCRM } from './csv.js';
 import { FeishuCRM } from './feishu.js';
-import { NotionCRM } from './notion.js';
-import { AirtableCRM } from './airtable.js';
 import { registerCRM, listCRMs } from '../registry.js';
 import { logger } from '../../core/logger.js';
 
@@ -40,21 +38,9 @@ export function registerAll(): void {
     }));
   }
 
-  // Notion
-  if (process.env.NOTION_API_KEY) {
-    // V2: 按 crm.yaml 配置动态创建实例
-  }
-
-  // Airtable
-  if (process.env.AIRTABLE_API_KEY && process.env.AIRTABLE_BASE_ID) {
-    // V2: 按 crm.yaml 配置动态创建实例
-  }
-
   log.info({ crms: listCRMs() }, '已注册 CRM');
 }
 
 export { CsvCRM } from './csv.js';
 export { FeishuCRM } from './feishu.js';
-export { NotionCRM } from './notion.js';
-export { AirtableCRM } from './airtable.js';
 export type { CrmConfig } from './feishu.js';
