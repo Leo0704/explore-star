@@ -1,9 +1,3 @@
-/**
- * CostTracker 测试
- *
- * Phase 2 #4:验证 token 估算 + cost 累加 + batch_size 记录
- */
-
 import { describe, it, expect, vi } from 'vitest';
 import { CostTracker, estimateTokens } from '../../../src/adapters/llm/_cost-tracker.js';
 import type { LLMProvider } from '../../../src/core/types.js';
@@ -23,7 +17,7 @@ function makeLLM(
     },
     capabilities: { jsonMode: true, functionCalling: false, vision: false, contextWindow: 1000 },
     async complete(_prompt: string) {
-      return 'fake-response-text';  // 18 字符 → 5 tokens (ceil 18/4)
+      return 'fake-response-text';
     },
     async embed() { return []; },
     async ping() { return { ok: true, latency_ms: 0 }; },
@@ -54,7 +48,7 @@ describe('CostTracker', () => {
   it('单次调用累加 prompt + completion tokens', async () => {
     const llm = makeLLM();
     const tracker = new CostTracker(llm, 'test-llm');
-    await tracker.complete('a'.repeat(40)); // prompt = 10 tokens
+    await tracker.complete('a'.repeat(40));
     const snap = tracker.snapshot();
     expect(snap.prompt_tokens).toBe(10);
     expect(snap.completion_tokens).toBe(5);
@@ -64,9 +58,7 @@ describe('CostTracker', () => {
   it('按 pricing 计算 estimated_cost_usd', async () => {
     const llm = makeLLM({ inputPerMTok: 1.0, outputPerMTok: 2.0, embedPerMTok: 0 });
     const tracker = new CostTracker(llm, 'test-llm');
-    await tracker.complete('a'.repeat(4000)); // 1000 prompt tokens
-    // response 18 chars / 4 = 5 completion tokens
-    // cost = (1000/1e6)*1 + (5/1e6)*2 = 0.001 + 0.00001 = 0.00101
+    await tracker.complete('a'.repeat(4000));
     const snap = tracker.snapshot();
     expect(snap.estimated_cost_usd).toBeCloseTo(0.00101, 5);
   });

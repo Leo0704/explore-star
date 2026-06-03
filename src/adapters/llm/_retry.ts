@@ -1,14 +1,3 @@
-/**
- * 共享 fetch 重试 helper(LLM adapters 用)
- *
- * 重试策略:
- *   - 429 / 5xx: 指数退避(优先用 Retry-After header)
- *   - AbortError / ECONNRESET / ETIMEDOUT: 指数退避
- *   - 其他错误: 直接抛出
- *
- * 默认: maxRetries=3, baseDelayMs=1000, timeoutMs=30000
- */
-
 export interface FetchWithRetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
@@ -37,17 +26,14 @@ export async function fetchWithRetry(
         clearTimeout(timer);
       }
 
-      // 429 / 5xx 重试
       if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
         if (attempt < maxRetries) {
           const retryAfterRaw = res.headers?.get?.('retry-after');
           let retryAfterMs = 0;
           if (retryAfterRaw) {
             if (/^[0-9]+$/.test(retryAfterRaw)) {
-              // delta-seconds
               retryAfterMs = Number(retryAfterRaw) * 1000;
             } else {
-              // HTTP-date
               const dateMs = Date.parse(retryAfterRaw);
               if (!Number.isNaN(dateMs)) {
                 retryAfterMs = Math.max(0, dateMs - Date.now());

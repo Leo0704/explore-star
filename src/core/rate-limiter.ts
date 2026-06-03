@@ -1,15 +1,3 @@
-/**
- * Per-channel 速率限制调度器（Phase 1 #2）
- *
- * 设计（spec §2.3）：
- *   - QPS 用 token bucket 简化版（不引 p-queue）
- *   - QPS=0 边界：构造时立即调 escalateIfHalted() 发**一次** notifier
- *     后续每次 wait 调用直接 throw RateLimitHaltedError
- *   - fail-loud：QPS=0 = 停服 + escalate，**不**静默空跑
- *   - 每日计数（friend_request / dm）走内存（不持久化，进程崩 = 计数清零）
- *     理由：本期是节奏控制，不是预算控制；Phase 0 已有 task-executor 的磁盘版
- */
-
 import { logger } from './logger.js';
 import type { Notifier, RateLimits } from './types.js';
 
@@ -51,7 +39,6 @@ export class RateLimiter {
 
   static fromConfig(opts: RateLimiterOptions): RateLimiter {
     const rl = new RateLimiter(opts);
-    // 启动时检查 QPS=0 → 立即 escalate（**只**一次 per resource）
     for (const [resource, qps] of [
       ['search', opts.channelLimits.search_qps],
       ['user_videos', opts.channelLimits.user_videos_qps],

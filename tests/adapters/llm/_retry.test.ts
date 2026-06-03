@@ -52,10 +52,8 @@ describe('fetchWithRetry', () => {
       .mockResolvedValueOnce({ status: 200, ok: true, headers: { get: () => null } });
 
     const p = fetchWithRetry('https://example.com', { method: 'POST' }, { baseDelayMs: 1 });
-    // 推进 1.9s, 还不该重试
     await vi.advanceTimersByTimeAsync(1900);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // 推进到 2s+
     await vi.advanceTimersByTimeAsync(200);
     const res = await p;
     expect(res.status).toBe(200);
@@ -70,7 +68,6 @@ describe('fetchWithRetry', () => {
       { method: 'POST' },
       { maxRetries: 2, baseDelayMs: 1 },
     );
-    // Catch the rejection now so unhandled-rejection events don't fire while timers advance.
     const settled = p.then(
       r => ({ ok: true as const, value: r }),
       e => ({ ok: false as const, error: e }),
@@ -78,14 +75,11 @@ describe('fetchWithRetry', () => {
     await vi.runAllTimersAsync();
     const result = await settled;
 
-    // On persistent 5xx, fetchWithRetry returns the final 5xx Response (does not throw)
-    // because the loop falls through to `return res` once retries are exhausted.
-    // Verify the caller gets the 500 back so adapter-level `if (!res.ok)` can surface the error.
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.status).toBe(500);
     }
-    expect(fetchMock).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('retries on ECONNRESET then succeeds', async () => {

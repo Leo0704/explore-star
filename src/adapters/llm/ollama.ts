@@ -1,11 +1,3 @@
-/**
- * Ollama LLM Provider（实现 LLMProvider，Ollama /api/chat）
- *
- * 依赖：OLLAMA_BASE_URL 环境变量（默认 http://localhost:11434）
- * 模型：qwen2.5（默认）
- * 本地免费，适合开发/测试
- */
-
 import type { LLMOptions, LLMProvider } from '../../core/types.js';
 import { fetchWithRetry } from './_retry.js';
 

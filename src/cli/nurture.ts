@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：nurture
- *
- * 用法: npx explore-star nurture --business <dir> --output <file>
- *       单跑引导引擎（生成每日任务）
- */
-
 import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { loadBusinessProfile } from '../core/business-profile.js';
@@ -39,15 +32,12 @@ export async function runNurture(args: string[]): Promise<void> {
 
   await registerBuiltins();
 
-  // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
   const { profile, conversion } = loaded;
 
-  // 从 CRM 读取 leads
   const crm = getCRM('csv');
   const allLeads = await crm.listLeads({ has_open_task: true });
 
-  // 生成任务
   const tasks = generateDailyTasks(allLeads, { profile, conversion, dailyTaskLimit: limit });
 
   console.log(`[nurture] 生成了 ${tasks.length} 个任务`);

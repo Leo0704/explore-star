@@ -1,37 +1,22 @@
-/**
- * explore-star schedule —— 定时任务管理
- *
- * 命令：
- *   schedule --install    把 schedule.yaml 写入系统 crontab
- *   schedule --list       查看已安装的定时任务
- *   schedule --uninstall  从系统 crontab 移除探星任务
- */
-
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { parse as parseYaml } from 'yaml';
 
-// ── Types ───────────────────────────────────────────────────────────────────
-
 interface ScheduleJob {
   name: string;
-  cron: string;       // 5 段 cron 表达式（分 时 日 月 周）
-  command: string;     // explore-star 子命令（如 run / insights / conversion-report）
-  args?: string[];     // 额外参数
+  cron: string;
+  command: string;
+  args?: string[];
 }
 
 interface ScheduleConfig {
-  project_dir: string;  // 自动填充，不需要用户写
+  project_dir: string;
   jobs: ScheduleJob[];
 }
 
-// ── Constants ───────────────────────────────────────────────────────────────
-
-const CRON_TAG = '# [explore-star]'  // 探星 cron 条目的标记，用于 uninstall 时识别
+const CRON_TAG = '# [explore-star]'
 const SCHEDULE_FILE = 'schedule.yaml'
-
-// ── Public API ──────────────────────────────────────────────────────────────
 
 export async function runCLI(args: string[]) {
   const businessDir = extractFlag(args, '--business') ?? process.cwd()
@@ -81,11 +66,9 @@ async function install(schedulePath: string, businessDir: string) {
     process.exit(1)
   }
 
-  // 先卸载旧的
   const existingCrontab = getCrontab()
   const cleaned = removeExploreStarEntries(existingCrontab)
 
-  // 构建新的 cron 条目
   const projectDir = businessDir
   const newEntries = config.jobs.map(job => {
     const args = job.args?.length ? ' ' + job.args.map(shellQuote).join(' ') : ''
@@ -93,7 +76,6 @@ async function install(schedulePath: string, businessDir: string) {
     return `${CRON_TAG} ${job.cron} ${cmd}  # ${job.name}`
   })
 
-  // 合并写入
   const newCrontab = cleaned
     ? `${cleaned}\n${newEntries.join('\n')}\n`
     : `${newEntries.join('\n')}\n`
@@ -178,10 +160,6 @@ function removeExploreStarEntries(crontab: string): string {
     .trim()
 }
 
-/**
- * 用单引号包裹 shell 值，并把值内部的单引号转成 '\''。
- * 这样无论值里有什么元字符（空格、$、;、&、|、> 等），都会被当成字面量。
- */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }

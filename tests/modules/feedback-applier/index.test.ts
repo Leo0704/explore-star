@@ -1,7 +1,3 @@
-/**
- * feedback-applier 端到端测试（200 fake outcomes）
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -31,7 +27,6 @@ describe('applyOutcomeFeedback (e2e)', () => {
         outcome: o,
         confidence: 0.9,
         days_to_outcome: 5,
-        // i % 30 → 所有事件都在 30 天窗口内
         captured_at: new Date(Date.now() - (i % 30) * 86400000).toISOString(),
         source: 'manual' as const,
       }));

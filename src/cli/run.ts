@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：run
- *
- * 用法: npx explore-star run --business <dir> [--dry-run]
- *       跑每日主流程（§3.7 编排器）
- */
-
 import { runDaily } from '../orchestration/run-daily.js';
 import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 import { acquireLock, releaseLock, setupSignalHandlers } from './run-lock.js';

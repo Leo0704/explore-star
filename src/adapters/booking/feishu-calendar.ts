@@ -1,13 +1,3 @@
-/**
- * 飞书日历事件监听 BookingProvider
- *
- * 依赖：
- *   - FEISHU_APP_ID, FEISHU_APP_SECRET（与飞书 CRM 共用）
- *   - 飞书日历 ID（FEISHU_CALENDAR_ID）
- *
- * 原理：轮询飞书日历 API，检测新增事件，映射为 BookingEvent。
- */
-
 import type { BookingEvent, BookingProvider } from './base.js';
 
 interface FeishuCalendarConfig {
@@ -25,19 +15,18 @@ export class FeishuCalendarBooking implements BookingProvider {
 
   async *watchBookings(): AsyncIterable<BookingEvent> {
     let syncToken = '';
-    const intervalMs = 60_000; // 60s 轮询
+    const intervalMs = 60_000;
 
     while (true) {
       try {
         const result = await this.fetchEvents(syncToken);
         for (const event of result.events) {
-          if (event.status !== 'completed') continue; // 只处理已完成事件
+          if (event.status !== 'completed') continue;
           const bookingEvent = this.parseEvent(event);
           if (bookingEvent) yield bookingEvent;
         }
         syncToken = result.syncToken;
       } catch {
-        // 轮询期间出错，静默等待下次重试
       }
       await new Promise(resolve => setTimeout(resolve, intervalMs));
     }
@@ -51,10 +40,6 @@ export class FeishuCalendarBooking implements BookingProvider {
       return false;
     }
   }
-
-  // -------------------------------------------------------------------------
-  // 内部
-  // -------------------------------------------------------------------------
 
   private async fetchEvents(syncToken: string): Promise<{ events: FeishuEvent[]; syncToken: string }> {
     const token = await this.getToken();
@@ -80,7 +65,6 @@ export class FeishuCalendarBooking implements BookingProvider {
 
   private parseEvent(event: FeishuEvent): BookingEvent | null {
     const summary = event.summary ?? '';
-    // 从标题解析 cid，格式：探星-{cid}-{日期}
     const match = summary.match(/^探星-(.+?)-\d{4}/);
     if (!match) return null;
 

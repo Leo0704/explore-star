@@ -1,9 +1,3 @@
-/**
- * CRM 同步模块（§3.5）
- *
- * 从 Lead[] 调 CRMAdapter.syncLeads，错误归档到 data/failed/
- */
-
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { CRMAdapter, Lead, SyncResult } from '../../core/types.js';
@@ -12,9 +6,7 @@ import { logger } from '../../core/logger.js';
 const log = logger.child({ module: 'crm-sync' });
 
 export interface CrmSyncOptions {
-  /** 失败归档目录，默认 data/failed/ */
   failedDir?: string;
-  /** 失败文件名前缀，默认 crm-sync */
   failedPrefix?: string;
 }
 
@@ -25,10 +17,6 @@ export interface CrmSyncReport {
   failedCids: string[];
   errors: Array<{ cid: string; error: string }>;
 }
-
-// ---------------------------------------------------------------------------
-// CRM 同步主函数
-// ---------------------------------------------------------------------------
 
 export async function syncLeads(
   crm: CRMAdapter,
@@ -46,7 +34,6 @@ export async function syncLeads(
   try {
     result = await crm.syncLeads(leads);
   } catch (err) {
-    // CRM 调用直接失败，全部归档
     const errorMsg = err instanceof Error ? err.message : String(err);
     const report: CrmSyncReport = {
       total: leads.length,
@@ -68,7 +55,6 @@ export async function syncLeads(
     errors: result.errors,
   };
 
-  // 归档失败记录
   if (result.failed > 0) {
     const failedLeads = leads.filter(l => result.errors.some(e => e.cid === l.cid));
     await archiveFailedLeads(failedDir, failedPrefix, report, failedLeads);
@@ -76,10 +62,6 @@ export async function syncLeads(
 
   return report;
 }
-
-// ---------------------------------------------------------------------------
-// 失败归档
-// ---------------------------------------------------------------------------
 
 async function archiveFailedLeads(
   failedDir: string,
@@ -104,10 +86,6 @@ async function archiveFailedLeads(
   log.info({ failed: report.failed, filePath }, '归档失败记录');
 }
 
-// ---------------------------------------------------------------------------
-// CLI 入口
-// ---------------------------------------------------------------------------
-
 export async function runCLI(args: string[]): Promise<void> {
   const get = (flag: string) => {
     const i = args.indexOf(flag);
@@ -129,25 +107,17 @@ export async function runCLI(args: string[]): Promise<void> {
   const { readFile, writeFile, mkdir } = await import('node:fs/promises');
   const { dirname } = await import('node:path');
 
-  // 读取输入
   const inputRaw = await readFile(inputPath, 'utf-8');
   const leads: Lead[] = JSON.parse(inputRaw);
 
-  // 创建 CRM adapter
   const crm = await createCrmAdapter(crmType, crmConfigPath);
 
-  // 同步
   const report = await syncLeads(crm, leads);
 
-  // 输出报告
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2), 'utf-8');
   log.info({ synced: report.synced, total: report.total }, '同步完成');
 }
-
-// ---------------------------------------------------------------------------
-// CRM Adapter 工厂（支持多类型）
-// ---------------------------------------------------------------------------
 
 async function createCrmAdapter(type: string, configPath: string): Promise<CRMAdapter> {
   switch (type) {

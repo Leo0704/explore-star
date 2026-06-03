@@ -1,9 +1,3 @@
-/**
- * run-daily 落 cost_estimate 到 run_history.jsonl
- *
- * Phase 2 #4:验证 finally 块 entry 含 cost_estimate 字段(即使全 0)
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -62,7 +56,7 @@ describe('runDaily 落 cost_estimate 到 run_history', () => {
       injectChannel: stubChannel,
       skipLLM: true,
       mode: 'read-only',
-    }).catch(() => { /* 预期可能 throw */ });
+    }).catch(() => { });
 
     expect(existsSync(historyPath)).toBe(true);
     const content = readFileSync(historyPath, 'utf-8');
@@ -86,7 +80,7 @@ describe('runDaily 落 cost_estimate 到 run_history', () => {
       injectWriteHistory: true,
       skipLLM: true,
       mode: 'read-only',
-    }).catch(() => { /* 预期 throw */ });
+    }).catch(() => { });
 
     expect(existsSync(historyPath)).toBe(true);
     const content = readFileSync(historyPath, 'utf-8');

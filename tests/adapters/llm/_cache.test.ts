@@ -1,14 +1,3 @@
-/**
- * LLM response cache 测试
- *
- * 验证:
- *   1. 同一输入两次调用,第二次命中 cache 不调 fetcher
- *   2. 不同 input 不会命中(隔离)
- *   3. 持久化写入并能回读
- *   4. fetcher 抛错时不写 cache
- *   5. 不同 model 不会碰撞
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +22,7 @@ describe('LLM response cache', () => {
       const k1 = buildCacheKey('gpt-4', 'sys', 'user');
       const k2 = buildCacheKey('gpt-4', 'sys', 'user');
       expect(k1).toBe(k2);
-      expect(k1).toHaveLength(64); // sha256 hex
+      expect(k1).toHaveLength(64);
     });
 
     it('不同 model 产生不同 key', () => {
@@ -150,7 +139,6 @@ describe('LLM response cache', () => {
       const params = { model: 'm', systemPrompt: 's', userPrompt: 'u-err', fetcher };
 
       await expect(completeWithCache(params)).rejects.toThrow('boom');
-      // 第二次调用仍应打 fetcher(因为没写 cache)
       await expect(completeWithCache(params)).rejects.toThrow('boom');
       expect(fetcher).toHaveBeenCalledTimes(2);
     });

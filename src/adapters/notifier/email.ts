@@ -1,12 +1,3 @@
-/**
- * Email Notifier（实现 Notifier，nodemailer SMTP）
- *
- * 依赖：
- *   - SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS 环境变量
- *   - 或 SMTP_URL（smtp://user:pass@host:port）
- *   - TO_EMAIL（默认通知接收邮箱）
- */
-
 import type { Notifier, NotificationMessage, SendResult } from '../../core/types.js';
 
 export class EmailNotifier implements Notifier {

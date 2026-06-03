@@ -1,12 +1,3 @@
-/**
- * prompts-loader learned_* 变量扩展测试（Phase 2 #3）
- *
- * 覆盖：
- *   - compileIntentSystemPrompt 接受 IntentSystemContext（含 learned_*）
- *   - learned_* 缺省 → 空数组 → {{#if}} 块不展开（不报错）
- *   - learned_* 提供 → {{#each}} 正确渲染
- */
-
 import { describe, it, expect } from 'vitest';
 import { compileIntentSystemPrompt } from '../../../src/modules/intent-analyzer/prompts-loader.js';
 import type { IntentSystemContext } from '../../../src/modules/intent-analyzer/prompts-loader.js';

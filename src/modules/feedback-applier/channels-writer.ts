@@ -1,10 +1,3 @@
-/**
- * channels.yaml 写回（Phase 2 #3 主动学习回路）
- *
- * 复用 applyKeywordWeights 的模式：yaml.parse → 改 personas[].value_score → yaml.stringify 写回
- * 失败 fail-loud 优先：缺文件 / 不可写 → log warn + 返回 skipped，不抛
- */
-
 import { readFile, writeFile } from 'node:fs/promises';
 import YAML from 'yaml';
 import { logger } from '../../core/logger.js';

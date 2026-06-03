@@ -1,16 +1,3 @@
-/**
- * Circuit Breaker 单元测试（Phase 1 #2）
- *
- * 覆盖：
- *  - 初始 CLOSED 状态
- *  - 失败 >= threshold → OPEN + onOpen hook
- *  - OPEN 期间 exec() throw CircuitOpenError 且不调 fn
- *  - cooldown 后 OPEN → HALF_OPEN
- *  - HALF_OPEN 成功 → CLOSED
- *  - HALF_OPEN 失败 → OPEN
- *  - CLOSED 状态下 recordSuccess 重置计数
- */
-
 import { describe, it, expect, vi } from 'vitest';
 import { CircuitBreaker } from '../../src/core/circuit-breaker.js';
 
@@ -31,7 +18,6 @@ describe('CircuitBreaker', () => {
     await expect(cb.exec(fail)).rejects.toThrow('boom');
     expect(cb.getState()).toBe('OPEN');
     expect(onOpen).toHaveBeenCalledWith('OPEN');
-    // OPEN 期间：exec() 抛 Error，且 fn 不被调
     const calls = vi.fn(fail);
     await expect(cb.exec(calls)).rejects.toThrow('Circuit breaker "test" is OPEN');
     expect(calls).not.toHaveBeenCalled();
@@ -45,7 +31,7 @@ describe('CircuitBreaker', () => {
     });
     await expect(cb.exec(async () => { throw new Error('x'); })).rejects.toThrow('x');
     expect(cb.getState()).toBe('OPEN');
-    now += 600;  // advance past cooldown
+    now += 600;
     expect(cb.getState()).toBe('HALF_OPEN');
     const result = await cb.exec(async () => 'recovered');
     expect(result).toBe('recovered');
@@ -72,6 +58,6 @@ describe('CircuitBreaker', () => {
     cb.recordSuccess();
     cb.recordFailure();
     cb.recordFailure();
-    expect(cb.getState()).toBe('CLOSED');  // 2 + 1 + 1 = 没超 threshold 3
+    expect(cb.getState()).toBe('CLOSED');
   });
 });

@@ -1,9 +1,3 @@
-/**
- * crm-sync 单元测试（§3.5）
- *
- * 覆盖：同步成功/失败/部分失败
- */
-
 import { describe, it, expect } from 'vitest';
 import { syncLeads } from '../../src/modules/crm-sync/index.js';
 import type { Lead, CRMAdapter, SyncResult } from '../../src/core/types.js';
@@ -40,7 +34,6 @@ function mkLead(overrides: Partial<Lead> = {}): Lead {
   };
 }
 
-// Mock CRM adapter
 class MockCRM implements CRMAdapter {
   shouldFail: boolean = false;
   failCids: Set<string> = new Set();

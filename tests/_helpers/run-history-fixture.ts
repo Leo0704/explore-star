@@ -1,9 +1,3 @@
-/**
- * 共享 fixture: makeEntry
- *
- * 用途：tests/orchestration/run-history.test.ts + tests/cli/status.test.ts
- */
-
 import type { RunHistoryEntry } from '../../src/orchestration/run-history.js';
 
 export function makeEntry(overrides: Partial<RunHistoryEntry> = {}): RunHistoryEntry {

@@ -35,7 +35,6 @@ describe('FeishuCRM', () => {
   });
 
   it('updateStatus throws on HTTP 500', async () => {
-    // Token → search (ok) → PUT /records/{id} (500)
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ tenant_access_token: 'tok', expire: 3600 }),

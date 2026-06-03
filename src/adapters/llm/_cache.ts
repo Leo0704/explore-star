@@ -1,18 +1,3 @@
-/**
- * LLM response cache
- *
- * 基于 sha256(model + systemPrompt + userPrompt) 的 in-memory cache,
- * 可选持久化到 ./data/llm-cache.jsonl (NDJSON).
- *
- * 设计:
- *   - key: sha256 hex(64 chars),由 caller 自己构造
- *   - value: { response: string, createdAt: ISO, model: string, promptHash: string }
- *   - 失败/降级:任何 IO 异常都被吞掉,只打 warning,不阻塞主流程
- *   - 单进程内存上限:不设硬上限(MVP),进程重启清空
- *
- * 不引入第三方依赖,所有 IO 走 node:fs/promises + node:crypto.
- */
-
 import { createHash } from 'node:crypto';
 import { appendFile, readFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -20,10 +5,6 @@ import { dirname } from 'node:path';
 import { logger } from '../../core/logger.js';
 
 const log = logger.child({ module: 'adapters/llm/_cache' });
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 export interface CacheEntry {
   response: string;
@@ -33,40 +14,23 @@ export interface CacheEntry {
 }
 
 export interface CacheOptions {
-  /** 持久化路径(可选)。提供则写入到 NDJSON 文件 */
   persistPath?: string;
-  /** 是否启用持久化(默认 false) */
   persist?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Globals (in-memory cache, 单例)
-// ---------------------------------------------------------------------------
-
 const memoryCache = new Map<string, CacheEntry>();
 
-/** 磁盘索引是否已加载（process 内一次性） */
 let diskIndexLoaded = false;
 
-/** 测试 hook:清空内存 cache 与磁盘索引标记 */
 export function _clearMemoryCache(): void {
   memoryCache.clear();
   diskIndexLoaded = false;
 }
 
-/** 测试 hook:查看当前内存 cache 大小 */
 export function _memoryCacheSize(): number {
   return memoryCache.size;
 }
 
-// ---------------------------------------------------------------------------
-// Key generation
-// ---------------------------------------------------------------------------
-
-/**
- * 生成 cache key: sha256(model + '\n' + systemPrompt + '\n' + userPrompt)
- * 同样输入 → 同样 key;不同 model/system/user 不会碰撞。
- */
 export function buildCacheKey(model: string, systemPrompt: string, userPrompt: string): string {
   const h = createHash('sha256');
   h.update(model);
@@ -77,24 +41,14 @@ export function buildCacheKey(model: string, systemPrompt: string, userPrompt: s
   return h.digest('hex');
 }
 
-// ---------------------------------------------------------------------------
-// Lookup / Store
-// ---------------------------------------------------------------------------
-
-/**
- * 查 cache(内存 → 可选磁盘)
- * 返回 CacheEntry | null
- */
 export async function cacheGet(
   key: string,
   model: string,
   opts: CacheOptions = {},
 ): Promise<CacheEntry | null> {
-  // 1. 内存优先
   const mem = memoryCache.get(key);
   if (mem) return mem;
 
-  // 2. 磁盘 fallback:首次访问时一次性加载全部到内存索引,后续 O(1) 查表
   if (opts.persist && opts.persistPath && existsSync(opts.persistPath)) {
     if (!diskIndexLoaded) {
       try {
@@ -103,10 +57,8 @@ export async function cacheGet(
           if (!line) continue;
           try {
             const entry = JSON.parse(line) as CacheEntry;
-            // 同 key 后写覆盖前写(NDJSON 追加语义,尾部为最新)
             memoryCache.set(entry.promptHash, entry);
           } catch {
-            // 跳过损坏行
             continue;
           }
         }
@@ -115,7 +67,6 @@ export async function cacheGet(
         log.warn({ err: e, path: opts.persistPath }, '读取 cache 失败,降级到无 cache');
       }
     }
-    // 命中内存索引(可能仍 miss —— 首次 cacheSet 才回填)
     const hit = memoryCache.get(key);
     if (hit && hit.model === model) return hit;
   }
@@ -123,19 +74,13 @@ export async function cacheGet(
   return null;
 }
 
-/**
- * 写 cache(内存 + 可选磁盘追加)
- * 失败时只 warn,不抛
- */
 export async function cacheSet(
   key: string,
   entry: CacheEntry,
   opts: CacheOptions = {},
 ): Promise<void> {
-  // 1. 内存
   memoryCache.set(key, entry);
 
-  // 2. 磁盘(NDJSON 追加,失败降级)
   if (opts.persist && opts.persistPath) {
     try {
       const dir = dirname(opts.persistPath);
@@ -149,26 +94,14 @@ export async function cacheSet(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Convenience helper (供 adapter 用)
-// ---------------------------------------------------------------------------
-
 export interface CompleteWithCacheParams {
   model: string;
   systemPrompt: string;
   userPrompt: string;
-  /** 实际 fetch 函数(命中 cache 时不调用) */
   fetcher: () => Promise<string>;
-  /** cache 选项(可启用持久化) */
   cacheOpts?: CacheOptions;
 }
 
-/**
- * 带 cache 的 complete 包装:
- *   1. 算 key
- *   2. 查 cache,命中直接返回
- *   3. 未命中调 fetcher,结果写 cache,返回
- */
 export async function completeWithCache(
   params: CompleteWithCacheParams,
 ): Promise<string> {

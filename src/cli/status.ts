@@ -1,15 +1,3 @@
-/**
- * CLI 子命令：status
- *
- * 用法: npx explore-star status --business <dir> [--days 7] [--json]
- *       扫 data/run_history.jsonl，输出最近 N 天的 health 概览
- *
- * 退出码：
- *   0   全部 run 都是 completed
- *   1   最近一次 run 是 failed/login_required/browser_escalated
- *        OR 历史有过 run 但最近 7 天无（"停跑"信号）
- */
-
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { extractFlag, showUsage, selfInvoke } from './_shared.js';
@@ -107,11 +95,8 @@ export async function runStatus(args: string[]): Promise<void> {
   const days = daysRaw ? Math.max(1, parseInt(daysRaw, 10)) : 7;
   const jsonMode = args.includes('--json');
 
-  // history 路径从 businessDir 派生
   const historyPath = resolveHistoryPath(business);
 
-  // neverRunBefore 判定：history 文件不存在
-  // 修复：原 fileExists 走 readFileSync，权限/IO 抖动会误判；改用 existsSync
   const neverRunBefore = !existsSync(historyPath);
   const entries = neverRunBefore ? [] : await readRunHistory(historyPath, { sinceDays: days });
 

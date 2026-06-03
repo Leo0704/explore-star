@@ -1,13 +1,3 @@
-/**
- * 健康检查（§5.4 4 类告警）
- *
- * V1.4 实现：
- *   - checkSystemHealth: 系统基本状态（磁盘/cron/日志）
- *   - checkAdapterHealth: 各 adapter 连通性（LLM/CRM/Channel/Notifier）
- *   - checkSafetyLimits: 今日限速状态（任务数/好友数/私信数）
- *   - checkEmergencyStop: 紧急停止开关
- */
-
 import { existsSync, readFileSync, statSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getNotifier, getCRM, getChannel, listLLMs } from '../adapters/registry.js';
@@ -26,13 +16,6 @@ export interface HealthCheckResult {
   summary: string;
 }
 
-// ---------------------------------------------------------------------------
-// 4 类健康检查
-// ---------------------------------------------------------------------------
-
-/**
- * 全面健康检查
- */
 export async function checkAll(businessDir?: string): Promise<HealthCheckResult> {
   const results = [
     await checkSystemHealth(),
@@ -57,26 +40,18 @@ export async function checkAll(businessDir?: string): Promise<HealthCheckResult>
   };
 }
 
-/**
- * §5.4.1 系统基本状态（磁盘/cron/日志）
- */
 export async function checkSystemHealth(): Promise<HealthCheckResult> {
   const checks: HealthCheckResult['checks'] = [];
 
-  // 磁盘空间检查 —— 用 statfs 读真实剩余空间（Node 18.15+）
-  // 修复 Bug 17：之前硬编码 10GB，永远 ok，state machine 在撒谎
   try {
     const dataPath = './data';
     if (existsSync(dataPath)) {
-      // statSync 用于确认 path 存在；statfs 才是真实磁盘空间
       statSync(dataPath);
       let realFreeGb = 0;
       if (typeof statfsSync === 'function') {
-        // statfs 返回 bytes：bsize * bfree
         const stats = statfsSync(dataPath);
         realFreeGb = (stats.bsize * stats.bfree) / 1024 / 1024 / 1024;
       }
-      // realFreeGb = 0 → statfs 不可用（fail-loud，不伪造 ok）
       checks.push({
         name: 'disk_space',
         status: realFreeGb > 1 ? 'ok' : realFreeGb === 0 ? 'warning' : 'critical',
@@ -90,7 +65,6 @@ export async function checkSystemHealth(): Promise<HealthCheckResult> {
     checks.push({ name: 'disk_space', status: 'warning', message: '无法检查磁盘空间' });
   }
 
-  // 日志目录检查
   const logPath = './logs';
   if (existsSync(logPath)) {
     checks.push({ name: 'log_dir', status: 'ok', message: '日志目录存在' });
@@ -98,7 +72,6 @@ export async function checkSystemHealth(): Promise<HealthCheckResult> {
     checks.push({ name: 'log_dir', status: 'warning', message: '日志目录不存在，将自动创建' });
   }
 
-  // 最近运行检查
   const todayLog = join('./logs', `${new Date().toISOString().slice(0, 10)}.log`);
   if (existsSync(todayLog)) {
     checks.push({ name: 'today_log', status: 'ok', message: '今日日志文件存在' });
@@ -114,13 +87,9 @@ export async function checkSystemHealth(): Promise<HealthCheckResult> {
   };
 }
 
-/**
- * §5.4.2 各 adapter 连通性
- */
 export async function checkAdapterHealth(businessDir?: string): Promise<HealthCheckResult> {
   const checks: HealthCheckResult['checks'] = [];
 
-  // LLM 检查
   try {
     const llms = listLLMs();
     if (llms.length > 0) {
@@ -132,13 +101,12 @@ export async function checkAdapterHealth(businessDir?: string): Promise<HealthCh
     checks.push({ name: 'llm', status: 'error', message: `LLM 检查失败：${e instanceof Error ? e.message : String(e)}` });
   }
 
-  // CRM 检查（从业务配置读取实际 CRM 类型）
   let crmType = 'csv';
   if (businessDir) {
     try {
       const { profile } = await loadBusinessProfile(businessDir);
       crmType = profile.crm.type;
-    } catch { /* fallback csv */ }
+    } catch { }
   }
   try {
     const crm = getCRM(crmType);
@@ -152,7 +120,6 @@ export async function checkAdapterHealth(businessDir?: string): Promise<HealthCh
     checks.push({ name: 'crm', status: 'error', message: `CRM (${crmType}) 检查失败：${e instanceof Error ? e.message : String(e)}` });
   }
 
-  // Channel 检查
   try {
     const channel = getChannel('douyin');
     if (channel) {
@@ -169,7 +136,6 @@ export async function checkAdapterHealth(businessDir?: string): Promise<HealthCh
     checks.push({ name: 'channel', status: 'error', message: `Channel 检查失败：${e instanceof Error ? e.message : String(e)}` });
   }
 
-  // Notifier 检查
   try {
     const notifier = getNotifier('console');
     checks.push({ name: 'notifier', status: 'ok', message: 'Notifier 可用' });
@@ -185,9 +151,6 @@ export async function checkAdapterHealth(businessDir?: string): Promise<HealthCh
   };
 }
 
-/**
- * §5.4.3 今日限速状态
- */
 export async function checkSafetyLimits(businessDir?: string): Promise<HealthCheckResult> {
   const checks: HealthCheckResult['checks'] = [];
   const today = new Date().toISOString().slice(0, 10);
@@ -199,13 +162,11 @@ export async function checkSafetyLimits(businessDir?: string): Promise<HealthChe
       safetyConfig = JSON.parse(readFileSync(safetyPath, 'utf-8'));
     }
   } catch {
-    // 使用默认值
   }
 
   const budget = safetyConfig.daily_budget as Record<string, number> || {};
   const limits = safetyConfig.rate_limits as Record<string, unknown> || {};
 
-  // 从 data/tmp/tasks-{date}.json 读取今日任务数
   const tasksPath = `./data/tmp/tasks-${today}.json`;
   let todayTasks = 0;
   if (existsSync(tasksPath)) {
@@ -213,7 +174,6 @@ export async function checkSafetyLimits(businessDir?: string): Promise<HealthChe
       const tasks = JSON.parse(readFileSync(tasksPath, 'utf-8'));
       todayTasks = Array.isArray(tasks) ? tasks.length : 0;
     } catch {
-      // 忽略
     }
   }
 
@@ -225,14 +185,13 @@ export async function checkSafetyLimits(businessDir?: string): Promise<HealthChe
     details: { used: todayTasks, limit: maxTasks },
   });
 
-  // 好友申请 / 私信配额（从 rate-counters 文件读取）
   const douyinLimits = (limits?.douyin as Record<string, number>) || {};
   const countersPath = `./data/rate-counters-${today}.json`;
   let counters = { friend_requests_today: 0, dm_today: 0 };
   if (existsSync(countersPath)) {
     try {
       counters = JSON.parse(readFileSync(countersPath, 'utf-8'));
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   const maxFriendReq = douyinLimits.friend_request_per_day ?? 20;
@@ -259,9 +218,6 @@ export async function checkSafetyLimits(businessDir?: string): Promise<HealthChe
   };
 }
 
-/**
- * §5.4.4 紧急停止开关
- */
 export async function checkEmergencyStop(): Promise<HealthCheckResult> {
   const checks: HealthCheckResult['checks'] = [];
   const stopPath = './config/EMERGENCY_STOP';
@@ -283,10 +239,6 @@ export async function checkEmergencyStop(): Promise<HealthCheckResult> {
     summary: checks[0].message,
   };
 }
-
-// ---------------------------------------------------------------------------
-// CLI 输出格式化
-// ---------------------------------------------------------------------------
 
 export function formatHealthReport(result: HealthCheckResult): string {
   const emoji = result.status === 'ok' ? '✅' : result.status === 'warning' ? '⚠️' : '❌';

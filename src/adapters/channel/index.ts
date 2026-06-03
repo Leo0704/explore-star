@@ -1,6 +1,3 @@
-/**
- * Channel Adapters 索引
- */
 import { registerDouyinChannel } from './douyin.js';
 
 export async function registerAll(): Promise<void> {

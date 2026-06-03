@@ -1,15 +1,9 @@
-/**
- * OpenAI Embedding Provider（V1.4 独立实现）
- *
- * 不复用 LLM 抽象（embeddings 有不同的 input/response 形状）
- */
-
 import type { EmbeddingProvider } from '../../core/types.js';
 
 export interface OpenAIEmbeddingOptions {
   apiKey: string;
   baseUrl?: string;
-  model?: string;             // 默认 text-embedding-3-small
+  model?: string;
 }
 
 export class OpenAIEmbedding implements EmbeddingProvider {

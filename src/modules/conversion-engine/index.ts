@@ -1,15 +1,3 @@
-/**
- * 转化引擎（§3.10）
- *
- * V1.4 实现：
- *   - onLeadAddedWechat: 加微后 24h 内推送物料
- *   - watchBookings: 监听预约事件
- *   - generateDailyReport: 转化日报
- *   - findDormantLeads: 找沉默客户
- *   - reactivateLead: 再激活话术生成+推送
- *   - recordTouchpoint: 触达事件记录
- */
-
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -32,10 +20,6 @@ export interface ConversionEngineOptions {
   postAddDelayHours?: number;
 }
 
-// ---------------------------------------------------------------------------
-// ConversionEngine 接口实现
-// ---------------------------------------------------------------------------
-
 export interface ConversionEngine {
   onLeadAddedWechat(cid: string): Promise<{ pushed: boolean; reason?: string }>;
   watchBookings(): Promise<void>;
@@ -45,9 +29,6 @@ export interface ConversionEngine {
   recordTouchpoint(cid: string, _touchpoint: { action_type: string; channel: string; content_summary: string; sent_at: string; persona?: string }): Promise<void>;
 }
 
-/**
- * 创建转化引擎实例
- */
 export function createConversionEngine(opts: ConversionEngineOptions): ConversionEngine {
   return {
     async onLeadAddedWechat(cid: string): Promise<{ pushed: boolean; reason?: string }> {
@@ -93,18 +74,10 @@ export function createConversionEngine(opts: ConversionEngineOptions): Conversio
   };
 }
 
-// ---------------------------------------------------------------------------
-// 快捷导出（兼容 V1.4 直接调用）
-// ---------------------------------------------------------------------------
-
 export { pushMaterial, generateConversionReport, generateConversionReport as generateDailyReport, pushConversionReport, pushConversionReport as pushDailyReport } from './material-pusher.js';
 export { watchBookings } from './booking-listener.js';
 export { findDormantLeads } from './dormant-finder.js';
 export { reactivateLead as reactivateLead, reactivateDormantPool } from './reactivate.js';
-
-// ---------------------------------------------------------------------------
-// 加微后 24h 内推送物料
-// ---------------------------------------------------------------------------
 
 export async function handleWechatAdded(
   lead: Lead,
@@ -124,7 +97,6 @@ export async function handleWechatAdded(
     return { pushed: false, reason: '业务方未配置 post_add_asset' };
   }
 
-  // 推送给客户（wechat adapter 未实现时 fallback console）
   let notifier;
   try { notifier = getNotifier('wechat'); } catch { notifier = getNotifier('console'); }
   await notifier.send({
@@ -135,10 +107,6 @@ export async function handleWechatAdded(
     level: 'info',
   });
 
-  // 注意：物料推送 ≠ 客户预约。状态推进留给 booking-listener / 实际客户行为。
-  // 触达事件由下方 recordEvent('touchpoint_sent') 落盘，无需再改 lead.status。
-
-  // Loop 5: 记录触达事件（供反馈分析器归因）
   void recordEvent({
     event: 'touchpoint_sent',
     cid: lead.cid,
@@ -153,10 +121,6 @@ export async function handleWechatAdded(
 
   return { pushed: true };
 }
-
-// ---------------------------------------------------------------------------
-// CLI 入口
-// ---------------------------------------------------------------------------
 
 export async function runCLI(args: string[]): Promise<void> {
   const get = (flag: string) => {

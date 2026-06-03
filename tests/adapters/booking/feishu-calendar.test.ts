@@ -52,11 +52,9 @@ describe('FeishuCalendarBooking', () => {
     const bp = new FeishuCalendarBooking({ calendarId: 'cal-1' });
     const gen = bp.watchBookings();
 
-    // 触发 first iteration by calling next()
     const it = gen.next();
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // 由于是无限循环，这里只测试初始解析逻辑
     expect(tokenCall).toBe(true);
     gen.return?.();
   });

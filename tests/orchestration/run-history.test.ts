@@ -1,12 +1,3 @@
-/**
- * src/orchestration/run-history.ts 单元测试
- *
- * 覆盖：
- *   - appendRunHistory: 原子写（tmp + rename）+ append
- *   - readRunHistory: 过滤坏行（log warn 跳过）+ 按时间倒序 + sinceDays 过滤
- *   - summaryStats: run 数 / 失败数 / 错误聚合 top 5
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -91,10 +82,10 @@ describe('readRunHistory', () => {
   it('filters by sinceDays', async () => {
     const now = Date.now();
     const oldEntry = makeEntry({
-      started_at: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),  // 10 天前
+      started_at: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
     });
     const newEntry = makeEntry({
-      started_at: new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString(),   // 1 天前
+      started_at: new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString(),
     });
     await appendRunHistory(historyPath, oldEntry);
     await appendRunHistory(historyPath, newEntry);

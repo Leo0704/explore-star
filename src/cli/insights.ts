@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：insights
- *
- * 用法: npx explore-star insights --business <dir> [--last <weeks>]
- *       跑反馈分析器（生成 weekly-insights.json）
- */
-
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins } from '../adapters/registry.js';
 import { runWeeklyAnalysis } from '../modules/feedback-analyzer/index.js';
@@ -38,11 +31,8 @@ export async function runInsights(args: string[]): Promise<void> {
 
   await registerBuiltins();
 
-  // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
-  // 目前暂时不直接用 loaded，但保留接口一致性
 
-  // 运行分析
   const insights = await runWeeklyAnalysis(businessDir, { insightsPath: outputPath, weeks });
 
   console.log(`[insights] 周报 ${insights.week_start}`);
@@ -56,7 +46,6 @@ export async function runInsights(args: string[]): Promise<void> {
     console.log(`  → 已写入 ${outputPath}`);
   }
 
-  // Top 关键词
   if (insights.keyword_performance.length > 0) {
     console.log('\n[Top 关键词]');
     const top = [...insights.keyword_performance]
@@ -67,7 +56,6 @@ export async function runInsights(args: string[]): Promise<void> {
     }
   }
 
-  // Top Persona
   if (insights.persona_value.length > 0) {
     console.log('\n[Persona 价值]');
     const top = [...insights.persona_value]

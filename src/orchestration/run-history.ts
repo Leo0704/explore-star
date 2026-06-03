@@ -1,14 +1,3 @@
-/**
- * 累积 run 历史（data/run_history.jsonl）
- *
- * V1.4 + Phase 0：append-only JSONL，每行一条 RunHistoryEntry
- *
- * 设计：
- *   - 单行追加走 appendFile，写入 < PIPE_BUF (POSIX 4KB) 时是原子操作，
- *     单条 RunHistoryEntry 远小于 4KB，避免 O(N) read+write+rename。
- *   - 坏行：readRunHistory 跳过（log warn），不阻塞后续
- */
-
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -47,14 +36,12 @@ export async function appendRunHistory(
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
 
-  // 追加单行 NDJSON：单条 entry 序列化后远小于 PIPE_BUF (4KB POSIX)，
-  // appendFile 在此范围内是原子追加，O(1)。
   const line = JSON.stringify(entry) + '\n';
   await appendFile(filePath, line, 'utf-8');
 }
 
 export interface ReadRunHistoryOptions {
-  sinceDays?: number;  // 默认 30
+  sinceDays?: number;
 }
 
 export async function readRunHistory(
@@ -105,7 +92,6 @@ export function summaryStats(entries: RunHistoryEntry[]): RunHistoryStats {
   const totalDuration = entries.reduce((sum, e) => sum + e.duration_ms, 0);
   const avgDurationMs = Math.round(totalDuration / entries.length);
 
-  // 错误聚合（按消息原样 dedup，Phase 0 不做归一化）
   const errorCounts = new Map<string, number>();
   for (const e of entries) {
     for (const errMsg of e.errors) {

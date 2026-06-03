@@ -57,7 +57,6 @@ describe('WechatNotifier', () => {
       body: '请处理',
       actions: [{ label: '查看', url: 'https://example.com' }],
     });
-    // Server 酱使用 desp parameter which supports markdown links
     expect(body).toContain('desp=');
     expect(decodeURIComponent(body)).toContain('[查看](https://example.com)');
   });

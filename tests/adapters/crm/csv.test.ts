@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-// We test the csvField logic by importing from the CSV adapter module.
-// Since csvField is not exported, we test it indirectly via CsvCRM.writeAll
-// or by parsing the output. Alternatively, we can re-implement the function
-// locally to verify expected behavior, matching the implementation in csv.ts.
-
 import { CsvCRM } from '../../../src/adapters/crm/csv.js';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -22,7 +17,6 @@ describe('CsvCRM csvField CWE-1236 formula injection protection', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  // Helper: simulate what csvField does
   function csvField(s: string): string {
     if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
       s = "'" + s;
@@ -73,7 +67,6 @@ describe('CsvCRM csvField CWE-1236 formula injection protection', () => {
     expect(field).toBe('"line1\nline2"');
   });
 
-  // Integration: write a lead with formula-like fields and read it back
   it('leads with formula-like comment_text are safely serialized', async () => {
     const lead = {
       cid: 'test-cid',
@@ -86,7 +79,7 @@ describe('CsvCRM csvField CWE-1236 formula injection protection', () => {
       user_signature: '',
       follower_count: 0,
       user_uid: '',
-      comment_text: '=cmd|calc', // formula injection attempt
+      comment_text: '=cmd|calc',
       comment_digg_count: 0,
       comment_create_time: '',
       is_target_persona: false,
@@ -116,17 +109,11 @@ describe('CsvCRM csvField CWE-1236 formula injection protection', () => {
     const fs = require('node:fs/promises');
     const content = await fs.readFile(join(tmp, 'leads.csv'), 'utf-8');
 
-    // The comment_text field should have a leading single quote (CWE-1236)
-    // e.g. the raw CSV line contains: ...,'=cmd|calc,0,...
-    // The prepended ' prevents Excel/Sheets from interpreting =cmd|calc as a formula
     expect(content).toContain("'=cmd|calc");
-    // Also verify the value is NOT stored as bare formula (without the leading quote)
-    // by checking it appears in the CSV with the quote prefix
     const lines = content.split('\n');
     const dataLine = lines.find(l => l.includes('test-cid'));
     expect(dataLine).toBeDefined();
     const fields = dataLine!.split(',');
-    // comment_text is at index 10 (0-based) in the COLUMNS array
     expect(fields[10]).toBe("'=cmd|calc");
   });
 });

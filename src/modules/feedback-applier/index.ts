@@ -1,15 +1,3 @@
-/**
- * feedback-applier 主入口（Phase 2 #3 主动学习回路）
- *
- * 责任：
- *   1. 读 outcomes.jsonl（zod 校验 + 过滤）
- *   2. 30 天窗口聚合 + 移动平均
- *   3. 写回 channels.yaml personas[].value_score
- *   4. 顺手产出 learned-examples cache
- *
- * 失败 fail-loud：所有错误降级为 skipped + log warn，**绝不抛**
- */
-
 import { join } from 'node:path';
 import { loadOutcomes, filterOutcomesForTraining } from './outcomes-loader.js';
 import { aggregateSignalsForPersona, applyMovingAverage } from './moving-average.js';

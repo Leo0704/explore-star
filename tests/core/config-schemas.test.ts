@@ -1,13 +1,3 @@
-/**
- * src/core/config-schemas.ts 单元测试
- *
- * 覆盖：
- *   - safetyConfigSchema: valid + 3 个 spec 钦点的 invalid case（0/-1/缺字段）
- *     + max<min / 空 emergency_stop / 空 fatal_signals / fatal_signals 包含空串
- *   - businessProfileSchema: valid + 4 个 invalid
- *   - formatZodError: 输出格式
- */
-
 import { describe, it, expect } from 'vitest';
 import {
   safetyConfigSchema,
@@ -15,10 +5,6 @@ import {
   formatZodError,
   ChannelRateLimitsSchema,
 } from '../../src/core/config-schemas.js';
-
-// ---------------------------------------------------------------------------
-// Test fixtures
-// ---------------------------------------------------------------------------
 
 const VALID_SAFETY = {
   rate_limits: {
@@ -55,10 +41,6 @@ const VALID_PROFILE = {
   llm: { provider: 'deepseek', model: 'deepseek-v3', api_key_env: 'DEEPSEEK_API_KEY' },
   crm: { type: 'feishu', config: { app_id_env: 'FEISHU_APP_ID' } },
 };
-
-// ---------------------------------------------------------------------------
-// safetyConfigSchema
-// ---------------------------------------------------------------------------
 
 describe('safetyConfigSchema', () => {
   it('accepts a valid safety config', () => {
@@ -159,10 +141,6 @@ describe('safetyConfigSchema', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// businessProfileSchema
-// ---------------------------------------------------------------------------
-
 describe('businessProfileSchema', () => {
   it('accepts a valid profile', () => {
     const r = businessProfileSchema.safeParse(VALID_PROFILE);
@@ -242,10 +220,6 @@ describe('businessProfileSchema', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// formatZodError
-// ---------------------------------------------------------------------------
-
 describe('formatZodError', () => {
   it('produces a multi-line, prefixed, Chinese-readable error', () => {
     const r = safetyConfigSchema.safeParse({});
@@ -258,10 +232,6 @@ describe('formatZodError', () => {
     }
   });
 });
-
-// ============================================================================
-// ChannelRateLimits (channels.yaml — channel_rate_limits 块)
-// ============================================================================
 
 describe('ChannelRateLimitsSchema', () => {
   it('accepts valid', () => {

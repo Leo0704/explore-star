@@ -1,19 +1,3 @@
-/**
- * 飞书 CRM Adapter（§3.5）
- *
- * 写入飞书多维表（Base）。
- *
- * 依赖：
- *   - 飞书开放平台应用（app_id + app_secret）
- *   - 飞书多维表 table_id
- *   - tenant_access_token 通过 app_id/app_secret 换取
- *
- * V1.4 实现要点：
- *   - 简化为「单条写入」模式（不批量；多维表 batch 写入有 1000 条/次限制）
- *   - 字段映射来自 `business/crm.yaml → field_mapping`
- *   - 缺字段时静默跳过（不报错）
- */
-
 import type { CRMAdapter, Lead, LeadFilter, LeadStatus, SyncResult } from '../../core/types.js';
 
 interface FeishuTenantToken {
@@ -44,8 +28,6 @@ export class FeishuCRM implements CRMAdapter {
   }
 
   async getLead(cid: string): Promise<Lead | null> {
-    // 飞书多维表没有"按 cid 查询"——需用 search 接口
-    // V1.4 简化：返回 null（业务方通过 status filter 拉列表）
     return null;
   }
 
@@ -103,8 +85,6 @@ export class FeishuCRM implements CRMAdapter {
   }
 
   async listLeads(filter?: LeadFilter): Promise<Lead[]> {
-    // V1.4 简化：飞书多维表 list 不实现，业务方先 sync 到 CSV 再分析
-    // V2: 实现飞书 search API
     return [];
   }
 
@@ -116,10 +96,6 @@ export class FeishuCRM implements CRMAdapter {
       return false;
     }
   }
-
-  // -------------------------------------------------------------------------
-  // 内部
-  // -------------------------------------------------------------------------
 
   private async upsertLead(lead: Lead, token: string): Promise<void> {
     const fields: Record<string, unknown> = {};
@@ -133,7 +109,6 @@ export class FeishuCRM implements CRMAdapter {
     const existing = await this.findRecordIdByCid(lead.cid, token);
 
     if (existing) {
-      // 2a. 找到 → PUT 更新
       const patchRes = await fetch(
         `${this.tableBase}/records/${existing}`,
         {
@@ -149,7 +124,6 @@ export class FeishuCRM implements CRMAdapter {
         throw new Error(`飞书更新失败 ${patchRes.status}: ${await patchRes.text()}`);
       }
     } else {
-      // 2b. 没找到 → POST 新增
       const postRes = await fetch(
         `${this.tableBase}/records`,
         {
@@ -241,15 +215,11 @@ export class FeishuCRM implements CRMAdapter {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 类型扩展（FeishuCRM 专用）
-// ---------------------------------------------------------------------------
-
 export interface CrmConfig {
-  baseUrl?: string;           // 默认 https://open.feishu.cn
-  appToken: string;           // 飞书多维表 app_token（URL 中 /base/ 后面那段）
-  tableId: string;            // 飞书多维表 table_id
-  appIdEnv: string;           // 环境变量名
-  appSecretEnv: string;       // 环境变量名
+  baseUrl?: string;
+  appToken: string;
+  tableId: string;
+  appIdEnv: string;
+  appSecretEnv: string;
   fieldMapping: Record<string, string>;
 }

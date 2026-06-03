@@ -1,19 +1,5 @@
-/**
- * CLI 子命令测试
- *
- * 关键约定：CLI 在打印 --help 或参数错误后调用 process.exit()。
- * 在 vitest 中 process.exit 会以异常方式传播，导致 Promise reject / 测试崩溃。
- * 这里在每个 case 跑之前 mock 掉 process.exit，让 CLI 走完主流程。
- *
- * 测试方法：通过 spyOn console.log / console.error 收集 stdout / stderr，
- * 然后断言关键字（防止「不抛错 = 通过」这种空断言）。
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-/**
- * 收集 stdout / stderr
- */
 function captureOutput(): {
   stdout: string[];
   stderr: string[];
@@ -49,7 +35,6 @@ describe('CLI Commands', () => {
       const { runCLI } = await import('../src/cli/init.js');
       await runCLI([]);
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
-      // 必填参数缺失：应打印 USAGE（含 "init <name>"），打印错误 "缺少 <name>"，并退出 1
       expect(combined).toMatch(/init\s*<name>/i);
       expect(output.stderr.join('\n')).toMatch(/缺少\s*<name>/);
       expect(exitSpy).toHaveBeenCalledWith(1);
@@ -59,16 +44,13 @@ describe('CLI Commands', () => {
   describe('doctor', () => {
     it('应执行 5 类健康检查（含 Node / LLM / CRM / Adapter / 紧急停止）', async () => {
       const { runCLI } = await import('../src/cli/doctor.js');
-      // doctor 必填 --business
       await runCLI(['--business', './business.example/燃点-FDE']);
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
-      // 关键诊断项
       expect(combined).toMatch(/Node/);
       expect(combined).toMatch(/opencli/);
       expect(combined).toMatch(/LLM/);
       expect(combined).toMatch(/CRM/);
       expect(combined).toMatch(/紧急停止/);
-      // 汇总
       expect(combined).toMatch(/汇总：\s*\d+\s*通过/);
     });
   });
@@ -80,14 +62,12 @@ describe('CLI Commands', () => {
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
       expect(combined).toMatch(/--business/);
       expect(combined).toMatch(/--dry-run/);
-      // 验证不是空字符串
       expect(combined.length).toBeGreaterThan(20);
     });
 
     it('--help 退出码不为 1', async () => {
       const { runCLI } = await import('../src/cli/run.js');
       await runCLI(['--help']);
-      // run --help 应只 print USAGE，不调用 process.exit(1)
       expect(exitSpy).not.toHaveBeenCalled();
     });
   });
@@ -95,7 +75,6 @@ describe('CLI Commands', () => {
   describe('analyze', () => {
     it('missing --input 应打印 USAGE 和错误（exit code != 0）', async () => {
       const { runCLI } = await import('../src/cli/analyze.js');
-      // analyze 缺 --input 时只 return（不调 process.exit）但应打印 USAGE + 错误
       await runCLI([]);
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
       expect(combined).toMatch(/--input/);
@@ -140,7 +119,6 @@ describe('CLI Commands', () => {
       const combined = output.stdout.join('\n') + '\n' + output.stderr.join('\n');
       expect(combined).toMatch(/--business/);
       expect(combined).toMatch(/--last/);
-      // 反馈分析器的产物
       expect(combined).toMatch(/weekly-insights/);
     });
   });
@@ -188,13 +166,6 @@ describe('CLI Commands', () => {
   });
 });
 
-/**
- * R2 cleanup: 验证 7 个 CLI 子命令不传 --business 都应退出码 1。
- *
- * 测试风格：mock 掉 process.exit（与 cli-commands.test.ts 顶部约定一致），
- * 用 try/catch 吞掉 process.exit 被 mock 后函数继续执行时抛出的 TypeError
- * （这属于 test-infra 噪声，生产环境 process.exit 真退出不会触发）。
- */
 describe('CLI Commands: 缺 --business 应退出 1', () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let output: ReturnType<typeof captureOutput>;
@@ -224,13 +195,10 @@ describe('CLI Commands: 缺 --business 应退出 1', () => {
       try {
         await runner();
       } catch {
-        // process.exit 被 mock 后函数继续跑，loadBusinessProfile(undefined) 会抛
-        // 生产环境 process.exit 真退出，不会到这里
       }
       expect(exitSpy).toHaveBeenCalledWith(1);
       const errs = output.stderr.join('\n');
       expect(errs).toMatch(new RegExp(`${name}\\s+需要\\s+--business`));
-      // 同时应打印 USAGE（含 --business 选项说明）
       expect(output.stdout.join('\n')).toMatch(/--business/);
     });
   }
@@ -252,14 +220,10 @@ describe('CLI Index', () => {
 
   it('未知命令应 print "未知命令" + USAGE + process.exit(1)', async () => {
     const indexMod = await import('../src/cli/index.js');
-    // index.ts 启动后调用 main()，我们用 process.argv 模拟传入
     const origArgv = process.argv;
     Object.defineProperty(process, 'argv', { value: ['node', 'cli.js', 'bogus-cmd-xyz'], configurable: true });
     try {
-      // main() 是自调用的，无法直接 import；触发子模块路径：直接调用
-      // 通过调用 index.ts 的 USAGE 文本作 fallback 验证（不依赖 main）
       expect(indexMod).toBeDefined();
-      // 验证 USAGE 包含所有命令名
       const usage = `init <name>              复制 business.example/燃点-FDE/ 到 ./<name>/
   doctor                   5 类健康检查（环境/Adapter/限速/紧急停止）
   run                      跑每日主流程（需 --business=<dir>）

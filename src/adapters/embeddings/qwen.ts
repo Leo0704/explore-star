@@ -1,24 +1,10 @@
-/**
- * 通义千问 Embedding Provider（Q1）
- *
- * 阿里云 DashScope 的 OpenAI 兼容接口（/compatible-mode/v1/embeddings）。
- * 与 openai.ts 同样的请求/响应形状，区别只在 baseUrl + model。
- *
- * 默认模型：text-embedding-v3（1024 维）。
- *   - 也可选 v2（1536 维，跟 OpenAI 同维度）
- *   - v3 支持 512/768/1024 三种维度（通过 dimensions 参数）
- *
- * API key 环境变量：DASHSCOPE_API_KEY
- * 申请地址：https://bailian.console.aliyun.com/
- */
-
 import type { EmbeddingProvider } from '../../core/types.js';
 
 export interface QwenEmbeddingOptions {
   apiKey: string;
-  baseUrl?: string;          // 默认 https://dashscope.aliyun.com/compatible-mode/v1
-  model?: string;            // 默认 text-embedding-v3
-  dimensions?: number;       // 默认 1024（v3 唯一原生支持的 1024 维）
+  baseUrl?: string;
+  model?: string;
+  dimensions?: number;
 }
 
 export class QwenEmbedding implements EmbeddingProvider {

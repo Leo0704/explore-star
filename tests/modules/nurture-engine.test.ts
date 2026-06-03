@@ -1,9 +1,3 @@
-/**
- * 引导引擎单元测试（§3.6）
- *
- * 覆盖：状态机推进、互动感知（§3.6.2）、智能放弃（§3.6.3）、再激活（§3.6.4）
- */
-
 import { describe, it, expect } from 'vitest';
 import { generateDailyTasks, findReactivatableLeads, reactivate } from '../../src/modules/nurture-engine/index.js';
 import type { Lead, LeadStatus, BusinessProfile, ConversionConfig } from '../../src/core/types.js';
@@ -115,7 +109,6 @@ describe('引导引擎', () => {
     });
 
     it('回复含中文拒绝词（别发了）→ opt_out=true + status=已流失', () => {
-      // F11 验证：applyInteractionFeedback 必须触发 checkAbandonment 中的 opt_out 分支
       const lead = mkLead({
         last_task_executed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
         last_task_result: '有回应',
@@ -130,7 +123,6 @@ describe('引导引擎', () => {
     });
 
     it('回复含英文拒绝词（stop）→ status=已流失', () => {
-      // F11 验证：英文拒绝词同样触发
       const lead = mkLead({
         last_task_executed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
         last_task_result: '有回应',
@@ -145,7 +137,6 @@ describe('引导引擎', () => {
     });
 
     it('正常回复（无拒绝词）→ opt_out 保持 false', () => {
-      // F11 验证：良性回复不会被误判
       const lead = mkLead({
         last_task_executed_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
         last_task_result: '有回应',
@@ -160,7 +151,7 @@ describe('引导引擎', () => {
 
     it('任务间隔 < 24h → 跳过', () => {
       const lead = mkLead({
-        last_task_executed_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),  // 1h 前
+        last_task_executed_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
         last_task_result: '有回应',
         execution_count: 1,
       });
@@ -203,8 +194,8 @@ describe('引导引擎', () => {
   describe('优先级排序', () => {
     it('高价值 persona 优先', () => {
       const leads = [
-        mkLead({ cid: '1', persona: 'ecommerce' }),  // value_score 4
-        mkLead({ cid: '2', persona: 'self_media' }),  // value_score 9
+        mkLead({ cid: '1', persona: 'ecommerce' }),
+        mkLead({ cid: '2', persona: 'self_media' }),
       ];
       const tasks = generateDailyTasks(leads, { profile, conversion });
       expect(tasks[0].lead_cid).toBe('2');

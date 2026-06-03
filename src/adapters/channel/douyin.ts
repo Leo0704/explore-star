@@ -1,19 +1,9 @@
-/**
- * 抖音 Channel Adapter
- *
- * 基于 vendored opencli 的 BrowserBridge 连接用户已登录的 Chrome。
- */
-
 import type {
   ChannelAdapter, Video, UserVideo, SearchQuery, RateLimits,
 } from '../../core/types.js';
 import { logger } from '../../core/logger.js';
 
 const log = logger.child({ module: 'douyin' });
-
-// ---------------------------------------------------------------------------
-// BrowserBridge 懒加载
-// ---------------------------------------------------------------------------
 
 let _bridge: any = null;
 let _page: any = null;
@@ -28,7 +18,6 @@ async function getPage() {
   return _page;
 }
 
-/** 断开 BrowserBridge 并关闭 daemon，防止进程泄漏。 */
 export async function disconnectDouyinChannel(): Promise<void> {
   try {
     if (_bridge) {
@@ -36,22 +25,16 @@ export async function disconnectDouyinChannel(): Promise<void> {
       _bridge = null;
       _page = null;
     }
-    // 关闭 daemon 进程（BrowserBridge.close() 不会自动关闭 daemon）
     try {
       const { requestDaemonShutdown } = await import('../../../vendor/opencli/src/browser/daemon-client.js');
       await requestDaemonShutdown();
       log.info('opencli daemon 已关闭');
     } catch {
-      // daemon 可能已经不在了，忽略
     }
   } catch (e) {
     log.warn({ err: e }, 'BrowserBridge 断开失败');
   }
 }
-
-// ---------------------------------------------------------------------------
-// 搜索结果投影
-// ---------------------------------------------------------------------------
 
 function parseDouyinCount(text: string): number {
   if (typeof text !== 'string') return 0;
@@ -83,10 +66,6 @@ function projectCard(card: any, index: number): Video | null {
   if (!url || !longest) return null;
   return { rank: index + 1, desc: longest, author, url, plays: 0, likes, comments: 0, shares: 0, aweme_id: awemeId };
 }
-
-// ---------------------------------------------------------------------------
-// Adapter 主类
-// ---------------------------------------------------------------------------
 
 export class DouyinChannel implements ChannelAdapter {
   readonly name = 'douyin';
@@ -134,11 +113,9 @@ export class DouyinChannel implements ChannelAdapter {
     if (!secUid) throw new Error('Douyin getUserVideos 需要 sec_uid');
     const page = await getPage();
     const limit = Math.min(opts.limit ?? 20, 20);
-    // 导航到用户主页
     await page.goto(`https://www.douyin.com/user/${secUid}`);
     await new Promise(r => setTimeout(r, 5000));
 
-    // 从 DOM 提取视频列表
     const videoCards = await page.evaluate(`(() => {
       const cards = [];
       const items = document.querySelectorAll('[data-e2e="user-post-list"] li, .user-post-list li, a[href*="/video/"]');
@@ -176,11 +153,9 @@ export class DouyinChannel implements ChannelAdapter {
   async getVideoComments(awemeId: string, count = 10): Promise<Array<{ text: string; digg_count: number; nickname: string; uid: string }>> {
     const page = await getPage();
     try {
-      // 导航到视频页面，评论区会自动加载
       await page.goto(`https://www.douyin.com/video/${awemeId}`);
       await new Promise(r => setTimeout(r, 5000));
 
-      // 滚动评论区加载更多
       for (let i = 0; i < 3; i++) {
         await page.evaluate(`(() => {
           const box = document.querySelector('[data-e2e="comment-list"]') || document.querySelector('.comment-mainContent');
@@ -190,10 +165,6 @@ export class DouyinChannel implements ChannelAdapter {
         await new Promise(r => setTimeout(r, 2000));
       }
 
-      // 从 DOM 提取评论
-      // 抖音评论结构：[data-e2e="comment-item"] 的 textContent 格式为
-      // "昵称...评论内容时间·地点数字分享回复"
-      // 没有独立的 comment-text/comment-nickname 选择器
       const comments = await page.evaluate(`(() => {
         const results = [];
         const items = document.querySelectorAll('[data-e2e="comment-item"]');
@@ -232,8 +203,6 @@ export class DouyinChannel implements ChannelAdapter {
 
   async ping(): Promise<{ ok: boolean; loggedIn: boolean }> {
     try {
-      // BrowserBridge 能连接即视为 ok
-      // 登录态在实际操作时自然暴露（搜索/拉评论会失败如果未登录）
       await getPage();
       return { ok: true, loggedIn: true };
     } catch { return { ok: false, loggedIn: false }; }

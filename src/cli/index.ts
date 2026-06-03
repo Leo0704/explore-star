@@ -1,21 +1,4 @@
 #!/usr/bin/env node
-/**
- * 探星 CLI 入口
- *
- * 命令：
- *   explore-star init <name>              —— 复制 business.example
- *   explore-star doctor                  —— 5 类健康检查
- *   explore-star run --business=<dir>    —— 跑主流程
- *   explore-star analyze                 —— 单跑意图分析
- *   explore-star nurture                 —— 单跑引导引擎
- *   explore-star convert                 —— 单跑转化引擎
- *   explore-star insights                —— 跑反馈分析器
- *   explore-star reactivate              —— 再激活沉默客户
- *   explore-star watch-bookings          —— 监听预约
- *   explore-star configure               —— 修改业务配置
- *   explore-star retry-dlq               —— 重试 CRM 同步失败队列
- *   explore-star status                  —— 查看 run 健康概览
- */
 
 const USAGE = `
 探星 CLI（Explore-Star v0.1.0）
@@ -92,7 +75,6 @@ async function main() {
         break;
       }
       case 'conversion-report': {
-        // 兼容旧命令：转发到 convert --verbose
         const { runCLI } = await import('./convert.js');
         await runCLI(['--verbose', ...rest]);
         break;

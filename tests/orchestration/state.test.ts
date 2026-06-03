@@ -1,10 +1,3 @@
-/**
- * state.ts 状态管理测试 —— Y3 并发安全验证
- *
- * 不 mock，直接用真实 ./data/state.json 路径。
- * 跑测试前会备份原 state，结束后恢复，避免污染其他测试。
- */
-
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
@@ -32,26 +25,23 @@ describe('state.ts — Y3 并发安全', () => {
       backup = await readFile(STATE_FILE, 'utf-8');
       hadStateFile = true;
     }
-    // 清理可能残留的 lockfile
     if (existsSync(LOCK_FILE)) {
       await unlink(LOCK_FILE);
     }
   });
 
   afterAll(async () => {
-    // 清理 lock
     if (existsSync(LOCK_FILE)) {
       try {
         await unlink(LOCK_FILE);
-      } catch { /* ignore */ }
+      } catch { }
     }
-    // 恢复 state
     if (hadStateFile && backup !== null) {
       await writeFile(STATE_FILE, backup, 'utf-8');
     } else if (existsSync(STATE_FILE)) {
       try {
         await unlink(STATE_FILE);
-      } catch { /* ignore */ }
+      } catch { }
     }
   });
 
@@ -101,24 +91,20 @@ describe('state.ts — Y3 并发安全', () => {
   it('10 并发 updateStep 不应撕文件，最终 state.json 可解析', async () => {
     await resetForNewDay();
 
-    // 10 个并发：索引循环 0-6，其中 7/8/9 会被 updateStep 内部静默忽略
     const promises = Array.from({ length: 10 }, (_, i) =>
       updateStep(i % 7, 'running', { iteration: i }),
     );
     await Promise.all(promises);
 
-    // 文件能解析 → 没有撕文件
     const raw = await readFile(STATE_FILE, 'utf-8');
     const parsed = JSON.parse(raw) as PipelineState;
     expect(parsed.date).toBeTruthy();
     expect(parsed.steps).toHaveLength(7);
 
-    // 7 个有效 step 都被更新成 running
     for (let i = 0; i < 7; i++) {
       expect(parsed.steps[i].status).toBe('running');
     }
 
-    // 重新 load 一遍也对得上
     const reloaded = await loadState();
     for (let i = 0; i < 7; i++) {
       expect(reloaded.steps[i].status).toBe('running');
@@ -131,13 +117,11 @@ describe('state.ts — Y3 并发安全', () => {
 
     const p1 = withStateLock(async (s) => {
       order.push(1);
-      // 模拟耗时操作
       await new Promise(r => setTimeout(r, 100));
       s.errors.push('p1');
       order.push(2);
       return s;
     });
-    // p2 排队，必须等 p1 释放锁
     const p2 = withStateLock(async (s) => {
       order.push(3);
       s.errors.push('p2');
@@ -147,7 +131,6 @@ describe('state.ts — Y3 并发安全', () => {
 
     await Promise.all([p1, p2]);
 
-    // 串行执行 → order 必须是 [1,2,3,4]
     expect(order).toEqual([1, 2, 3, 4]);
   });
 
@@ -159,7 +142,6 @@ describe('state.ts — Y3 并发安全', () => {
     });
     expect(result.currentStep).toBe(5);
     expect(result.completed).toBe(true);
-    // 其他字段没被覆盖
     expect(result.steps).toHaveLength(7);
   });
 });

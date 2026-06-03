@@ -1,12 +1,3 @@
-/**
- * 全链路 E2E 测试 —— 跟 `npx explore-star run` 完全一样
- *
- * 用真实业务配置 business.example/燃点-FDE/，
- * 真实调用 opencli（抖音）+ mimo（LLM）+ 飞书（CRM）。
- *
- * 唯一区别：mode='read-only' 跳过浏览器任务执行（避免真实操作抖音账号）。
- */
-
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolve } from 'node:path';
 
@@ -25,7 +16,6 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
   });
 
   afterAll(async () => {
-    // 清理 BrowserBridge 连接，防止 daemon 进程泄漏
     const { disconnectDouyinChannel } = await import('../../src/adapters/channel/douyin.js');
     await disconnectDouyinChannel();
   });
@@ -35,7 +25,6 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
     console.log('🚀 E2E 全链路测试 — 真实业务配置 business.example/燃点-FDE/');
     console.log(`${SEP}\n`);
 
-    // ── 配置加载 ──
     console.log('📋 加载业务配置...');
     const { loadBusinessProfile } = await import('../../src/core/business-profile.js');
     const loaded = await loadBusinessProfile(businessDir);
@@ -48,7 +37,6 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
     console.log(`   关键词: ${Object.keys(loaded.channels.search?.keywords ?? {}).join(', ')}`);
     console.log('');
 
-    // ── Adapter 检查 ──
     console.log('🔌 检查 Adapter...');
     const { registerBuiltins, getLLM, getCRM, getChannel } = await import('../../src/adapters/registry.js');
     await registerBuiltins();
@@ -70,7 +58,6 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
     }
     console.log('');
 
-    // ── 跑 runDaily ──
     console.log('🏃 执行 runDaily（全真模式，含浏览器操作）...');
     const { runDaily } = await import('../../src/orchestration/run-daily.js');
     const t0 = Date.now();
@@ -82,7 +69,6 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
-    // ── 结果 ──
     console.log(`\n${SEP}`);
     console.log('📊 流水线结果');
     console.log(`${SEP}`);
@@ -102,7 +88,6 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
       }
     }
 
-    // ── State ──
     const { loadState } = await import('../../src/orchestration/state.js');
     const state = await loadState();
     console.log(`\n   State: ${state.completed ? '✅ completed' : '⏳ 未完成'}`);
@@ -115,12 +100,10 @@ describeE2E('全链路 E2E（真实业务配置）', () => {
     console.log('✅ E2E 全链路测试完成');
     console.log(`${SEP}\n`);
 
-    // 断言
     expect(result).toBeDefined();
     expect(result.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(result.duration_ms).toBeGreaterThan(0);
     expect(state.completed).toBe(true);
-    // 全真模式下 tasksExecuted 可能 > 0（取决于有没有 lead 生成任务）
     expect(result.tasksExecuted).toBeGreaterThanOrEqual(0);
   }, 600_000);
 });

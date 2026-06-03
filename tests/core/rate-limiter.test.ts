@@ -1,14 +1,3 @@
-/**
- * Per-channel 速率限制调度器单元测试（Phase 1 #2）
- *
- * 覆盖：
- *   - QPS > 0 时不阻塞
- *   - QPS = 0 时 throw RateLimitHaltedError + 恰好 1 次 critical notifier
- *   - 日 quota: canFriendRequest / canDm
- *   - QPS 节流：第二次调用 sleep 到下一窗口
- *   - 正常 QPS 不触发 notifier
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RateLimiter } from '../../src/core/rate-limiter.js';
 import type { Notifier, NotificationMessage, SendResult, RateLimits } from '../../src/core/types.js';
@@ -59,7 +48,6 @@ describe('RateLimiter', () => {
       sleep: noopSleep,
     });
     await expect(rl.waitForSearch()).rejects.toThrow(/Rate limit halted/);
-    // 第二次也抛错（halted state 持续），但 notifier 只发 1 次
     await expect(rl.waitForSearch()).rejects.toThrow(/Rate limit halted/);
     expect(notifier.messages).toHaveLength(1);
     expect(notifier.messages[0].level).toBe('critical');
@@ -103,7 +91,6 @@ describe('RateLimiter', () => {
       sleep,
     });
     await rl.waitForSearch();
-    // 第二次 call 在同一秒内：QPS=2 间隔 500ms，但 fake timer 在同一时刻，elapsed=0 → 需 sleep 500ms
     const p = rl.waitForSearch();
     expect(sleep).toHaveBeenCalled();
     await p;

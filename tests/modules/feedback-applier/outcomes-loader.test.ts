@@ -1,7 +1,3 @@
-/**
- * outcomes-loader 单元测试
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

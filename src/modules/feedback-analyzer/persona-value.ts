@@ -1,15 +1,5 @@
-/**
- * Persona 价值归因（§3.11 回路 3：persona 价值排序）
- *
- * V1.4 实现：
- *   - 从 events.jsonl 聚合各 persona 的 leads / conversions / revenue
- *   - 计算 value_score（0-10）
- *   - 输出 PersonaValue[]
- */
-
 import type { LeadEvent, PersonaValue } from '../../core/types.js';
 
-// 转换状态集合：仅 已成交 算「转化」，中间状态（已私信/已加微/已预约）不计入。
 const CONVERTED_STATUSES = new Set(['已成交']);
 
 export interface PersonaValueResult {
@@ -17,9 +7,6 @@ export interface PersonaValueResult {
   ranking: Array<{ persona: string; value_score: number }>;
 }
 
-/**
- * 计算各 persona 的价值评分
- */
 export function computePersonaValue(events: LeadEvent[]): PersonaValueResult {
   const byPersona: Record<string, { leads: Set<string>; conversions: number; revenue: number }> = {};
 
@@ -29,7 +16,6 @@ export function computePersonaValue(events: LeadEvent[]): PersonaValueResult {
     byPersona[e.persona].leads.add(e.cid);
     if (e.to_status && CONVERTED_STATUSES.has(e.to_status as string)) {
       byPersona[e.persona].conversions++;
-      // 从事件 metadata 读实际营收，必须是 number，否则视作 0（避免字符串拼接）
       const rawRev = e.metadata?.revenue;
       const rev = typeof rawRev === 'number' ? rawRev : 0;
       byPersona[e.persona].revenue += rev;

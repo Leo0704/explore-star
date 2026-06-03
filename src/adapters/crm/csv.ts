@@ -1,13 +1,3 @@
-/**
- * 本地 CSV CRM Adapter（§3.5）
- *
- * 零配置、开发/调试用。生产推荐用 feishu / notion / airtable。
- *
- * 存储路径：./data/leads.csv
- *
- * CSV 列：所有 Lead 字段 + standard mapping
- */
-
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 
@@ -44,7 +34,6 @@ export class CsvCRM implements CRMAdapter {
 
       await this.writeAll([...byCid.values()]);
     } catch (e) {
-      // IO failure: rollback the counted syncs and attribute the error to every lead in this batch.
       const err = String(e);
       for (const lead of leads) {
         errors.push({ cid: lead.cid, error: err });
@@ -102,7 +91,6 @@ export class CsvCRM implements CRMAdapter {
       all = all.filter(l => l.created_at >= after);
     }
     if (filter.has_open_task) {
-      // 简化为 status ∈ ['新发现', '已关注', '已互动', '已加好友', '已加微']
       const open: LeadStatus[] = ['新发现', '已关注', '已互动', '已加好友', '已加微'];
       all = all.filter(l => open.includes(l.status));
     }
@@ -118,10 +106,6 @@ export class CsvCRM implements CRMAdapter {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // 内部：CSV 读写
-  // -------------------------------------------------------------------------
-
   private async readAll(): Promise<Lead[]> {
     try {
       const raw = await readFile(this.csvPath, 'utf-8');
@@ -132,7 +116,6 @@ export class CsvCRM implements CRMAdapter {
         const values = parseCsvLine(line);
         const obj: Record<string, unknown> = {};
         for (let i = 0; i < header.length; i++) {
-          // Unescape literal \n (two chars) back to a real newline (Bug 14).
           obj[header[i]] = (values[i] ?? '').replace(/\\n/g, '\n');
         }
         return obj as unknown as Lead;
@@ -156,17 +139,10 @@ export class CsvCRM implements CRMAdapter {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 工具：CSV 字段转义
-// ---------------------------------------------------------------------------
-
 function csvField(s: string): string {
-  // CWE-1236 防护: 首字符为公式触发字符时前置单引号
   if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
     s = "'" + s;
   }
-  // Bug 14: escape literal newlines to two chars (\n) so that readAll's
-  // pre-parse split on '\n' cannot break a single field across multiple lines.
   s = s.replace(/\n/g, '\\n');
   if (s.includes(',') || s.includes('"')) {
     return `"${s.replace(/"/g, '""')}"`;

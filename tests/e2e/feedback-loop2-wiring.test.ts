@@ -1,17 +1,3 @@
-/**
- * 回路 2 闭环测试（§3.11 Loop 2）
- *
- * 验证：周分析产出的"最优钩子风格"真的被注入到下一批 LLM 调用。
- *
- * 关键问题（基于实际代码观察）：
- *   - run-daily.ts:193-205 调用 selectBestHookStyle() 拿最优风格
- *   - 传给 BatchContext.hookStyle
- *   - batch.ts:153 在 buildLead 里给 lead.hook_style 字段打标
- *   - ❓ 关键：hookStyle 是否被注入到 LLM prompt 本身？
- *
- * 本测试断言实际行为，避免"我描述的"和"代码做的"对不上。
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -65,7 +51,6 @@ describe('回路 2 闭环：feedback → 下一批 LLM', () => {
   });
 
   it('selectBestHookStyle 优先级：insights (≥3 测试) > profile.hook_config.style > 默认', async () => {
-    // 准备一份 weekly-insights.json，钩子风格「数据派案例」tested=10 replied=8 rate=0.8
     const insights: WeeklyInsights = {
       week_start: '2026-06-02',
       learning_period_complete: true,
@@ -115,7 +100,6 @@ describe('回路 2 闭环：feedback → 下一批 LLM', () => {
   });
 
   it('【关键】analyzeBatch 收到 hookStyle 后，导出的 lead 被打上该风格（归因闭环）', async () => {
-    // mock LLM：返回标准 JSON（用最简 systemPrompt/userTplStr 避免依赖 prompts 目录）
     const llmMock = {
       complete: vi.fn().mockResolvedValue(JSON.stringify([
         {
@@ -138,11 +122,10 @@ describe('回路 2 闭环：feedback → 下一批 LLM', () => {
       userTplStr: '{{#each comments}}{{video_desc}}\n{{/each}}',
       llm: llmMock,
       threshold: 0.7,
-      hookStyle: '数据派案例',  // 模拟 selectBestHookStyle 的输出
+      hookStyle: '数据派案例',
     });
 
     expect(result.leads).toHaveLength(1);
-    // 关键断言：lead.hook_style 被打上 "数据派案例"
     expect(result.leads[0].hook_style).toBe('数据派案例');
   });
 

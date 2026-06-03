@@ -1,10 +1,3 @@
-/**
- * Anthropic LLM Provider（实现 LLMProvider，Anthropic Messages API）
- *
- * 依赖：ANTHROPIC_API_KEY 环境变量
- * 模型：claude-3-5-sonnet-20241022（默认）
- */
-
 import type { LLMOptions, LLMProvider } from '../../core/types.js';
 import { fetchWithRetry } from './_retry.js';
 
@@ -17,7 +10,7 @@ export class AnthropicLLM implements LLMProvider {
   };
 
   readonly pricing = {
-    inputPerMTok: 3.0,    // claude-3-5-sonnet
+    inputPerMTok: 3.0,
     outputPerMTok: 15.0,
     embedPerMTok: 0,
   };
@@ -33,8 +26,6 @@ export class AnthropicLLM implements LLMProvider {
   private readonly model: string;
 
   async complete(prompt: string, opts: LLMOptions = {}): Promise<string> {
-    // 从 prompt 中提取 system prompt（约定：systemPrompt \n\n userPrompt \n\n ...)
-    // batch.ts 使用此约定，intent-analyzer 跨 batch 的 system 完全不变，适合 caching
     const parts = prompt.split('\n\n');
     let systemContent: string | undefined;
     let userContent: string;
@@ -43,7 +34,6 @@ export class AnthropicLLM implements LLMProvider {
       systemContent = parts[0];
       userContent = parts.slice(1).join('\n\n');
     } else {
-      // 没有 \n\n 约定时，整条作为 user message（向后兼容）
       userContent = prompt;
     }
 
@@ -85,8 +75,6 @@ export class AnthropicLLM implements LLMProvider {
   }
 
   async embed(_text: string): Promise<number[]> {
-    // Anthropic 目前没有 embedding 接口。
-    // 不能返 0 向量（会让 RAG cosine 全 0）；必须 fail-loud 让调用方换 provider。
     throw new Error(
       'Anthropic does not provide an embedding API; use a dedicated embedding provider (OpenAI or Qwen) for RAG indexing.',
     );

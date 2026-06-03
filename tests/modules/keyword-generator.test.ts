@@ -1,10 +1,5 @@
-/**
- * keyword-generator 单元测试
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { BusinessProfile, LLMProvider } from '../../src/core/types.js';
-// P0-G 修复：clearMemoryCache 清模块级缓存，否则测试间串味
 import { _clearMemoryCache } from '../../src/adapters/llm/_cache.js';
 
 beforeEach(() => {
@@ -92,10 +87,8 @@ describe('generateSearchKeywords', () => {
     const { generateSearchKeywords } = await import('../../src/modules/keyword-generator.js');
     const llm = makeLLM('{"keywords": ["词1", "词2"]}');
 
-    // parseKeywords 只处理数组，包装对象会 fallback 到正则提取
     const result = await generateSearchKeywords(makeProfile(), llm);
 
-    // 正则提取到 ["词1", "词2"]
     expect(Object.keys(result)).toEqual(['词1', '词2']);
   });
 

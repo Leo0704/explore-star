@@ -1,18 +1,3 @@
-/**
- * 3 状态熔断器（手写，无第三方依赖）
- *
- * 状态机：
- *   CLOSED ──(failures >= threshold)──→ OPEN
- *   OPEN   ──(now - opened_at >= cooldown)──→ HALF_OPEN
- *   HALF_OPEN ──(success)──→ CLOSED
- *   HALF_OPEN ──(failure)──→ OPEN
- *
- * 关键决策（spec §2.4）：
- *   - 状态仅存内存（**不**持久化）—— 重启进程 = 状态清零，对齐 fail-loud
- *   - onOpen 回调发 notifier（critical）—— 让熔断被人听见
- *   - injectClock 注入时间（测试用）
- */
-
 import { logger } from './logger.js';
 
 const log = logger.child({ module: 'circuit-breaker' });

@@ -1,13 +1,3 @@
-/**
- * Notifier 多通道解析
- *
- * 设计：
- *   - 从 profile.yaml observability.notifier.channels 读通道列表
- *   - 默认 ['console']（兜底，绝不静默丢告警）
- *   - 未注册的 channel log warn 跳过；全失败 → 兜底 console
- *   - channels=[] 视为用户配错，抛错（明示而不是默默用 console）
- */
-
 import type { BusinessProfile, Notifier } from './types.js';
 import { getNotifier } from '../adapters/registry.js';
 import { logger } from './logger.js';
@@ -39,7 +29,6 @@ export function resolveNotifiers(profile: BusinessProfile): Notifier[] {
     }
   }
 
-  // 全失败 → 兜底 console（绝不静默丢告警，channels 显式配了但全失败也算）
   if (resolved.length === 0) {
     log.error({ channels }, '所有配置的 notifier 通道均失败，回退到 console 兜底');
     try {

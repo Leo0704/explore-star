@@ -1,103 +1,78 @@
-/**
- * 探星（Explore-Star）核心类型定义
- *
- * 这是所有跨模块数据结构的**单一真相源**。所有 Adapter 实现、模块
- * 输入输出都必须用这里的类型（不允许在模块内重新定义 Lead / Profile 等）。
- *
- * 对应文档：
- *   - §3.3 Lead 字段
- *   - §3.5 CRM 标准字段映射
- *   - §3.6.1 Task / TaskResult
- *   - §2.4 business/*.yaml schema
- *   - §13.4 Adapter 接口
- *
- * 设计原则：
- *   1. 业务无关：所有字段对任意业务通用
- *   2. 严格 null/undefined 区分
- *   3. 时间字段统一 ISO 8601 字符串（不混用 Date 对象，方便 JSON 序列化）
- *   4. 任何「业务方自定义」字段用 Record<string, unknown> 兜底
- */
-
-// ============================================================================
-// 1. 业务画像（BusinessProfile）—— business/profile.yaml
-// ============================================================================
-
 export interface BusinessProfile {
   business: {
-    name: string;            // 业务名（用于 LLM prompt、通知、CRM 标识）
-    value_prop: string;      // 一句话价值主张
+    name: string;
+    value_prop: string;
     description?: string;
   };
 
   target_personas: Persona[];
 
-  intent_signals: string[];  // 意图信号词（供 §3.3 prompt 用）
-  buying_stages?: BuyingStage[];  // 可选；不填则用默认三段式
+  intent_signals: string[];
+  buying_stages?: BuyingStage[];
 
   llm: LLMConfig;
   crm: CRMConfig;
 
-  // P0-E 修复：channel/embedding/notifier 改为 profile 驱动，告别硬编码
   channel?: {
-    name: string;             // 默认 'douyin'，多 channel 时代改 'xiaohongshu' 等
+    name: string;
   };
   embedding?: {
-    provider: string;         // 默认 'qwen'，可改 'openai'
+    provider: string;
   };
   notifier?: {
-    default?: string;         // 默认 'console'，可改 'feishu'
+    default?: string;
   };
 
   hook_config?: {
-    style?: string;          // 默认「朋友推荐，不像销售」
-    max_length?: number;     // 默认 30
-    language?: string;       // 默认「中文」
-    styles?: string[];       // A/B 测试用风格池（默认 ["朋友推荐", "顾问"]）
+    style?: string;
+    max_length?: number;
+    language?: string;
+    styles?: string[];
   };
 
   feedback_config?: {
     auto_apply?: {
-      keyword_weight?: boolean;     // 默认 true
-      hook_style?: boolean;         // 默认 false
-      persona_value?: boolean;      // 默认 false
-      interaction_time?: boolean;   // 默认 false
+      keyword_weight?: boolean;
+      hook_style?: boolean;
+      persona_value?: boolean;
+      interaction_time?: boolean;
     };
   };
 
   observability?: {
-    run_history?: { enabled?: boolean };          // 默认 true
+    run_history?: { enabled?: boolean };
     notifier?: {
-      enabled?: boolean;                          // 默认 true
-      channels?: string[];                        // 默认 ['console']
+      enabled?: boolean;
+      channels?: string[];
     };
   };
 
-  prompts_dir?: string;      // 默认 business/prompts/
-  knowledge_dir?: string;    // 默认 business/knowledge/
+  prompts_dir?: string;
+  knowledge_dir?: string;
 }
 
 export interface Persona {
-  id: string;                // 如 self_media, ecommerce
-  name: string;              // 显示名
+  id: string;
+  name: string;
   description?: string;
-  typical_pain_points: string[];  // 典型痛点（intent prompt 用）
-  value_score?: number;      // 0-10，§3.11 自动调整（默认 5.0）
+  typical_pain_points: string[];
+  value_score?: number;
 }
 
 export interface BuyingStage {
-  id: string;                // awareness / consideration / decision
+  id: string;
   name: string;
-  description: string;       // 给 LLM 的判断标准
+  description: string;
 }
 
 export interface LLMConfig {
   provider: 'openai' | 'deepseek' | 'anthropic' | 'ollama' | 'custom';
-  model: string;             // 如 deepseek-v3, gpt-4o-mini
-  api_key_env: string;       // 环境变量名
-  base_url?: string;         // 自定义 base URL（用于代理/自部署）
-  temperature?: number;      // 默认 0.3
-  max_tokens?: number;       // 默认 1000
-  fallback?: Array<{         // 降级链
+  model: string;
+  api_key_env: string;
+  base_url?: string;
+  temperature?: number;
+  max_tokens?: number;
+  fallback?: Array<{
     provider: LLMConfig['provider'];
     model: string;
   }>;
@@ -105,42 +80,33 @@ export interface LLMConfig {
 
 export interface CRMConfig {
   type: 'feishu' | 'notion' | 'airtable' | 'csv' | 'custom';
-  config: Record<string, unknown>;  // 字段因 type 而异
-  field_mapping?: Record<string, string>;  // 标准 Lead 字段 → CRM 字段
+  config: Record<string, unknown>;
+  field_mapping?: Record<string, string>;
 }
-
-// ============================================================================
-// 2. 渠道配置（ChannelsConfig）—— business/channels.yaml
-// ============================================================================
 
 export interface ChannelsConfig {
   source?: {
-    mode: 'sec_uid' | 'keyword' | 'both';  // 默认 sec_uid
+    mode: 'sec_uid' | 'keyword' | 'both';
   };
   search?: {
-    keywords: Record<string, { weight: number }>;  // keyword → weight
-    limit_per_keyword?: number;     // 默认 10，硬上限 30
+    keywords: Record<string, { weight: number }>;
+    limit_per_keyword?: number;
   };
   target_sec_uids?: {
-    sec_uids: string[];             // KOL sec_uid 列表
-    user_videos_limit?: number;     // 默认 20，硬上限 20
-    comment_limit?: number;         // 默认 10，硬上限 10
+    sec_uids: string[];
+    user_videos_limit?: number;
+    comment_limit?: number;
   };
   filters?: {
-    min_likes?: number;             // 默认 100
-    max_age_days?: number;          // 默认 30
+    min_likes?: number;
+    max_age_days?: number;
   };
   comment_filters?: {
-    min_length?: number;            // 默认 4
-    exclude_emoji_only?: boolean;   // 默认 true
-    exclude_punctuation_only?: boolean; // 默认 true
-    exclude_marketing?: boolean;    // 默认 true（由 LLM 判断）
+    min_length?: number;
+    exclude_emoji_only?: boolean;
+    exclude_punctuation_only?: boolean;
+    exclude_marketing?: boolean;
   };
-  /**
-   * Phase 1 #2: 渠道速率限制（QPS + daily quota）。
-   * 0 = 停服（fail-loud 触发 notifier critical）。
-   * 不存在时：调度器使用 ChannelAdapter.rateLimits 默认值。
-   */
   channel_rate_limits?: {
     douyin?: {
       search_qps: number;
@@ -152,43 +118,34 @@ export interface ChannelsConfig {
   };
 }
 
-// ============================================================================
-// 3. 转化配置（ConversionConfig）—— business/conversion.yaml
-// ============================================================================
-
 export interface ConversionConfig {
-  lifecycle_states: LifecycleState[];  // 业务自定义生命周期
-  success_states: string[];            // 算"转化成功"的状态 ID（默认 ['closed']）
+  lifecycle_states: LifecycleState[];
+  success_states: string[];
   post_add_asset?: {
     type: 'pdf' | 'link' | 'image';
     name: string;
-    path: string;              // 本地路径或 URL
+    path: string;
   };
-  booking_url?: string;        // 转化路径入口
-  message_template?: string;   // 加微后推送话术
+  booking_url?: string;
+  message_template?: string;
   booking_provider?: {
     type: 'feishu_calendar' | 'webhook' | 'manual';
     config: Record<string, unknown>;
   };
   reactivation?: {
-    dormant_days?: number;     // 默认 30
-    max_attempts?: number;     // 默认 1
+    dormant_days?: number;
+    max_attempts?: number;
     message_template?: string;
   };
-  /** 业务方定义的额外字段（cost_per_lead / revenue_field 等） */
-  cost_per_lead?: number;      // 单 lead 成本估算
-  revenue_field?: string;      // CRM 中"营收"字段名
+  cost_per_lead?: number;
+  revenue_field?: string;
 }
 
 export interface LifecycleState {
-  id: string;                  // 如 wechat_added / booked / closed
-  name: string;                // 显示名
-  is_terminal: boolean;        // 已成交/已流失 = true
+  id: string;
+  name: string;
+  is_terminal: boolean;
 }
-
-// ============================================================================
-// 4. Lead —— 核心实体
-// ============================================================================
 
 export type LeadStatus =
   | '新发现'
@@ -202,91 +159,72 @@ export type LeadStatus =
   | '已流失'
   | '沉默'
   | '已再激活'
-  | (string & {});  // 支持 conversion.yaml 中业务方自定义状态（如 '已诊断' '已试用'）
+  | (string & {});
 
 export interface Lead {
-  // 身份
-  cid: string;                          // 抖音评论 ID（唯一）
+  cid: string;
   source: 'douyin_search' | 'douyin_user_videos' | 'manual';
-  aweme_id: string;                     // 关联视频 ID
-  video_url: string;                    // 视频链接
-  video_desc: string;                   // 视频标题/描述（给 LLM 上下文）
-  keyword: string;                      // 触发该 lead 的关键词/sec_uid
+  aweme_id: string;
+  video_url: string;
+  video_desc: string;
+  keyword: string;
 
-  // 用户信息
   nickname: string;
-  user_signature: string;               // 抖音个人签名
+  user_signature: string;
   follower_count: number;
   user_uid: string;
 
-  // 评论内容
   comment_text: string;
   comment_digg_count: number;
-  comment_create_time: string;          // ISO 8601
+  comment_create_time: string;
 
-  // LLM 分析结果（§3.3）
   is_target_persona: boolean;
-  persona: string;                      // target_personas.id 之一
-  pain_point: string;                   // 10-20 字
-  intent_score: number;                 // 0-1
-  buying_stage: string;                 // buying_stages.id
+  persona: string;
+  pain_point: string;
+  intent_score: number;
+  buying_stage: string;
   suggested_reply_hook: string;
   suggested_dm_hook: string;
 
-  // 状态机（§3.6）
   status: LeadStatus;
   status_history: Array<{
     from: LeadStatus | null;
     to: LeadStatus;
-    at: string;                         // ISO 8601
+    at: string;
     note?: string;
   }>;
 
-  // 用户拒绝标记（§3.6.3 opt_out 检测）
-  /** 用户明确拒绝（私信中说"不需要"/"别发了"等），立即停止所有后续任务 */
   opt_out?: boolean;
 
-  // 互动效果感知（§3.6.2）
   last_task_executed_at?: string;
   last_task_result?: '有回应' | '无回应' | '被拒' | '未执行';
   last_response_text?: string;
   execution_count: number;
   response_count: number;
 
-  // 转化（§3.10）
   wechat_added_at?: string;
   booked_at?: string;
   closed_at?: string;
-  revenue?: number;                     // CRM 中的营收字段
+  revenue?: number;
   last_interaction_at?: string;
 
-  // 元数据
   created_at: string;
   updated_at: string;
   notes?: string;
   custom_fields?: Record<string, unknown>;
 
-  // 🆕 反馈分析归因字段（§3.11 全链路归因）
-  /** 触发该 lead 的关键词/sec_uid（回路 1 关键词权重归因） */
   source_keyword?: string;
-  /** 来源视频 ID（与 aweme_id 一致；显式声明以满足 §3.11 字段契约） */
   source_video_id?: string;
-  /** 实际使用的钩子风格（回路 2 钩子风格 A/B 归因） */
   hook_style?: string;
-  /** lead 首次发现时间 ISO 8601（与 created_at 通常相同；显式声明满足 §3.3 字段契约） */
   detected_at?: string;
 }
-
-// ============================================================================
-// 5. Comment —— 原始评论（LLM 处理前）
-// ============================================================================
 
 export interface Comment {
   cid: string;
   aweme_id: string;
   video_url: string;
   video_desc: string;
-  keyword: string;                      // 触发来源
+  keyword: string;
 
   text: string;
   user: {
@@ -296,13 +234,9 @@ export interface Comment {
     signature: string;
   };
   digg_count: number;
-  create_time: string;                  // ISO 8601
+  create_time: string;
   reply_count: number;
 }
-
-// ============================================================================
-// 6. Task —— 引导任务（§3.6.1）
-// ============================================================================
 
 export type TaskAction =
   | 'like_and_follow'
@@ -320,40 +254,34 @@ export type TaskResult =
   | 'skipped';
 
 export interface Task {
-  task_id: string;                      // UUID
+  task_id: string;
   lead_cid: string;
   nickname: string;
   current_state: LeadStatus;
   next_action: TaskAction;
   hook: string;
-  hook_style: string;                   // 本次使用的钩子风格
+  hook_style: string;
   priority: 'high' | 'medium' | 'low';
   persona: string;
-  scheduled_at: string;                 // ISO 8601
-  reason: string;                       // 调度理由
+  scheduled_at: string;
+  reason: string;
   executed_at?: string;
   execution_result?: TaskResult;
   risk_signal?: string;
-  // 浏览器执行所需（§3.6.5 browserExecute 依赖）
-  video_url?: string;                   // 视频链接（like_and_follow / comment_reply 需要）
-  user_sec_uid?: string;                // 用户 sec_uid（friend_request / dm 需要）
-  // §3.11 关键词归因（从 lead.source_keyword 透传）
+  video_url?: string;
+  user_sec_uid?: string;
   source_keyword?: string;
 }
-
-// ============================================================================
-// 7. Conversion —— 转化引擎（§3.10）
-// ============================================================================
 
 export interface ConversionAction {
   type: 'send_pdf' | 'send_booking_link' | 'send_followup';
   channel: 'wechat' | 'feishu' | 'email';
   payload: Record<string, unknown>;
-  scheduled_at: string;                 // ISO 8601
+  scheduled_at: string;
 }
 
 export interface ConversionReport {
-  date: string;                         // YYYY-MM-DD
+  date: string;
   new_leads: number;
   new_wechat_added: number;
   new_bookings: number;
@@ -366,10 +294,6 @@ export interface ConversionReport {
   at_risk_leads: Lead[];
 }
 
-// ============================================================================
-// 8. Feedback —— 反馈分析器（§3.11）
-// ============================================================================
-
 export interface LeadEvent {
   event: 'lead_status_changed' | 'lead_created' | 'task_executed' | 'touchpoint_sent' | 'touchpoint_replied';
   cid: string;
@@ -379,12 +303,11 @@ export interface LeadEvent {
   hook_style: string;
   hook_text: string;
   persona: string;
-  interaction_time: string;             // ISO 8601
+  interaction_time: string;
   days_to_convert?: number;
   metadata?: Record<string, unknown>;
-  // Touchpoint-specific fields (F12: §3.10 触达方式归因回路)
-  touchpoint_type?: string;             // 触达类型，如 send_pdf / send_booking_link / send_followup / reactivate
-  touchpoint_channel?: string;          // 触达渠道，如 wechat / sms / console
+  touchpoint_type?: string;
+  touchpoint_channel?: string;
   touchpoint_result?: 'opened' | 'replied' | 'booked' | 'no_response';
 }
 
@@ -392,11 +315,11 @@ export interface KeywordPerformance {
   keyword: string;
   leads: number;
   conversions: number;
-  rate: number;                         // 原始转化率
-  smoothed_rate: number;                // 贝叶斯平滑后
-  weight: number;                       // 当前权重
-  suggested_weight?: number;            // 建议权重
-  auto_apply: boolean;                  // 是否自动应用
+  rate: number;
+  smoothed_rate: number;
+  weight: number;
+  suggested_weight?: number;
+  auto_apply: boolean;
 }
 
 export interface HookStylePerformance {
@@ -411,21 +334,21 @@ export interface PersonaValue {
   leads: number;
   conversions: number;
   revenue: number;
-  value_score: number;                  // 0-10
+  value_score: number;
 }
 
 export interface BestInteractionTimes {
   persona: string;
   hours: Array<{
-    weekday: number;                    // 0-6 (周日=0)
-    hour: number;                       // 0-23
+    weekday: number;
+    hour: number;
     rate: number;
     sample: number;
   }>;
 }
 
 export interface WeeklyInsights {
-  week_start: string;                   // YYYY-MM-DD
+  week_start: string;
   learning_period_complete: boolean;
   keyword_performance: KeywordPerformance[];
   hook_style_performance: HookStylePerformance[];
@@ -434,11 +357,6 @@ export interface WeeklyInsights {
   generated_at: string;
 }
 
-// ============================================================================
-// 9. Adapter 接口（§13.4）—— 完整版
-// ============================================================================
-
-// LLM Provider
 export interface LLMOptions {
   temperature?: number;
   maxTokens?: number;
@@ -463,7 +381,6 @@ export interface LLMProvider {
   ping(): Promise<{ ok: boolean; latency_ms: number }>;
 }
 
-// CRM
 export interface SyncResult {
   synced: number;
   failed: number;
@@ -483,13 +400,11 @@ export interface CRMAdapter {
   syncLeads(leads: Lead[]): Promise<SyncResult>;
   getLead(cid: string): Promise<Lead | null>;
   updateStatus(cid: string, status: LeadStatus, note?: string): Promise<void>;
-  /** 更新指定 lead 的若干字段（如 hook_style）。失败抛错。 */
   updateLeadFields(cid: string, fields: Partial<Lead>): Promise<void>;
   listLeads(filter?: LeadFilter): Promise<Lead[]>;
   ping(): Promise<boolean>;
 }
 
-// Channel
 export interface SearchQuery {
   keywords: string[];
   sort?: 'hot' | 'time';
@@ -510,7 +425,7 @@ export interface Video {
   likes: number;
   comments: number;
   shares: number;
-  aweme_id?: string;                    // 从 url 提取
+  aweme_id?: string;
 }
 
 export interface CommentOptions {
@@ -553,36 +468,13 @@ export interface RateLimits {
   dm_per_day: number;
 }
 
-// ============================================================================
-// Phase 3 #5 多渠道架构准备（roadmap §2.5）—— channel 速率策略 schema
-// ============================================================================
-
-/**
- * Channel 自我声明的 QPS 上限（**业务方策略**，写在 channels.yaml 的 `channels.<name>.qps` 节点）。
- *
- * 与 `RateLimits` 的区别：
- *   - `RateLimits`：平台硬上限（puppeteer / API 客观限制，写死在 channel adapter 里）
- *   - `QpsLimit`：探星系统对自身的限速（业务方可调，写在 yaml 里）
- *
- * 给 #2 rate-limiter 调度器消费。
- */
 export interface ChannelQpsLimit {
-  /** 单一动作的最大 QPS（如 1 = 1 req/sec） */
   qps?: number;
-  /** 突发容量（默认 = qps） */
   burst?: number;
 }
 
-/**
- * Channel 自我声明的每日配额。
- *
- * `null` = 平台不限。
- * `by_action` 可覆盖 `total`（更细粒度）。
- */
 export interface ChannelDailyQuota {
-  /** 平台每天允许的总动作数；null = 平台不限 */
   total?: number | null;
-  /** 动作级配额（可选，覆盖 total） */
   by_action?: Partial<{
     search: number;
     user_videos: number;
@@ -598,10 +490,9 @@ export interface ChannelAdapter {
   ping(): Promise<{ ok: boolean; loggedIn: boolean }>;
 }
 
-// Notifier
 export interface NotificationMessage {
   title?: string;
-  body: string;                         // 支持 markdown
+  body: string;
   level?: 'info' | 'warning' | 'critical';
   actions?: Array<{ label: string; url: string }>;
 }
@@ -617,7 +508,6 @@ export interface Notifier {
   send(message: NotificationMessage): Promise<SendResult>;
 }
 
-// Embeddings
 export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
   embedBatch(texts: string[]): Promise<number[][]>;
@@ -625,18 +515,14 @@ export interface EmbeddingProvider {
   readonly model: string;
 }
 
-// ============================================================================
-// 10. 系统统计（反馈分析器 + 健康检查用）
-// ============================================================================
-
 export interface SystemStats {
   daysSinceStart: number;
   totalLeads: number;
   leadsByPersona: Record<string, number>;
   leadsByStatus: Record<LeadStatus, number>;
-  conversionRate: number;               // 全部 lead 的转化率
-  costThisMonth: number;                // LLM + 通知 API 成本
-  revenueThisMonth: number;             // CRM 聚合
+  conversionRate: number;
+  costThisMonth: number;
+  revenueThisMonth: number;
   lastRunAt: string;
   lastRunStatus: 'success' | 'failed' | 'partial';
 }

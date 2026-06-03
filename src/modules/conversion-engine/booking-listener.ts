@@ -1,10 +1,3 @@
-/**
- * 预约监听器（§3.10 BookingProvider）
- *
- * V1.4 实现：调 BookingProvider（飞书日历 / webhook / manual）
- * 监听新预约事件 → 自动更新 lead 状态为"已预约"
- */
-
 import type { CRMAdapter, LeadStatus } from '../../core/types.js';
 import { getBookingProvider } from '../../adapters/registry.js';
 import { logger } from '../../core/logger.js';
@@ -13,13 +6,9 @@ const log = logger.child({ module: 'booking-listener' });
 
 export interface BookingListenerOptions {
   crm: CRMAdapter;
-  /** 轮询间隔（毫秒，默认 30s） */
   pollIntervalMs?: number;
 }
 
-/**
- * 启动预约监听循环，持续监听新预约事件
- */
 export async function watchBookings(
   opts: BookingListenerOptions,
 ): Promise<void> {
@@ -29,7 +18,6 @@ export async function watchBookings(
   try {
     provider = getBookingProvider('feishu_calendar');
   } catch {
-    // Provider not available
   }
 
   if (!provider) {

@@ -1,10 +1,3 @@
-/**
- * 飞书机器人 WebHook Notifier（实现 Notifier）
- *
- * 依赖：FEISHU_WEBHOOK_URL 环境变量
- * 文档：https://open.feishu.cn/document/server-docs/basic-bot/messages
- */
-
 import type { Notifier, NotificationMessage, SendResult } from '../../core/types.js';
 
 interface FeishuMessage {

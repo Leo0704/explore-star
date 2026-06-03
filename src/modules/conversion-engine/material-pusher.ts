@@ -1,12 +1,3 @@
-/**
- * 物料推送器（§3.10 加微后 24h 内推送 + 转化日报 + ROI）
- *
- * V1.4 实现：
- *   - 加微后 24h 内推送 post_add_asset（PDF / link / image）
- *   - 转化日报生成（每天 22:00）
- *   - ROI 计算
- */
-
 import type { Lead, ConversionConfig, ConversionReport, BusinessProfile, CRMAdapter } from '../../core/types.js';
 import { getNotifier } from '../../adapters/registry.js';
 import { recordEvent } from '../feedback-analyzer/event-recorder.js';
@@ -15,13 +6,8 @@ export interface MaterialPusherOptions {
   profile: BusinessProfile;
   conversion: ConversionConfig;
   crm: CRMAdapter;
-  /** 加微后延迟推送时长（小时，默认 24） */
   postAddDelayHours?: number;
 }
-
-// ---------------------------------------------------------------------------
-// 加微后 24h 内推送物料
-// ---------------------------------------------------------------------------
 
 export async function pushMaterial(
   lead: Lead,
@@ -44,9 +30,6 @@ export async function pushMaterial(
     return { pushed: false, reason: '业务方未配置 post_add_asset' };
   }
 
-  // 推送物料
-  // P0-B 修复：V1.4 真实 PDF 推送通道未实现，对 PDF 类型 fail-loud。
-  // link / image 类型走 text notifier（仅发文字描述）。
   const asset = opts.conversion.post_add_asset;
   if (asset?.type === 'pdf') {
     throw new Error(
@@ -64,8 +47,6 @@ export async function pushMaterial(
     level: 'info',
   });
 
-  // 记录触达事件（F12：用于 §3.10 触达方式归因回路）
-  // P0-B 修复：touchpoint_channel 用实际 notifier 名（不再是 'console'）
   const action_type = `send_${asset?.type ?? 'asset'}`;
   await recordEvent({
     event: 'touchpoint_sent',
@@ -78,9 +59,6 @@ export async function pushMaterial(
     persona: '',
     interaction_time: new Date().toISOString(),
   });
-
-  // 注意：物料推送 ≠ 客户预约。状态推进留给 booking-listener / 实际客户行为。
-  // 触达事件已通过 recordEvent('touchpoint_sent') 落盘，无需再改 lead.status。
 
   return { pushed: true };
 }
@@ -99,10 +77,6 @@ function buildMessage(lead: Lead, conversion: ConversionConfig): string {
 
   return out;
 }
-
-// ---------------------------------------------------------------------------
-// 转化日报生成
-// ---------------------------------------------------------------------------
 
 export async function generateConversionReport(
   date: string,
@@ -131,11 +105,9 @@ export async function generateConversionReport(
 
   const costToday = newLeads.length * (opts.conversion.cost_per_lead ?? 5);
 
-  // Hot leads：即将成交
   const hot = all.filter((l: Lead) => ['已加微', '已预约', '已诊断'].includes(l.status))
     .sort((a: Lead, b: Lead) => b.intent_score - a.intent_score).slice(0, 5);
 
-  // At risk：加微 > 5 天未互动
   const atRisk = all.filter((l: Lead) => {
     if (!['已加微', '已私信'].includes(l.status) || !l.wechat_added_at) return false;
     const days = (Date.now() - new Date(l.wechat_added_at).getTime()) / (1000 * 60 * 60 * 24);
@@ -156,10 +128,6 @@ export async function generateConversionReport(
     at_risk_leads: atRisk,
   };
 }
-
-// ---------------------------------------------------------------------------
-// 推送转化日报
-// ---------------------------------------------------------------------------
 
 export async function pushConversionReport(report: ConversionReport): Promise<void> {
   const notifier = getNotifier('console');

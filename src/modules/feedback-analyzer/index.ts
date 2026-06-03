@@ -1,12 +1,3 @@
-/**
- * 反馈分析器（§3.11）
- *
- * V1.4 实现：
- *   - runWeeklyAnalysis: 加载 events.jsonl，跑 5 条回路，写 weekly-insights.json
- *   - 5 条回路：关键词权重 / 钩子风格 / persona 价值 / 互动时段 / 触达方式
- *   - 前 2 周 learning period 数据不足时跳过调优
- */
-
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -23,23 +14,15 @@ import { logger } from '../../core/logger.js';
 
 const log = logger.child({ module: 'feedback-analyzer' });
 
-// ---------------------------------------------------------------------------
-// 配置常量（与 spec 同步）
-// ---------------------------------------------------------------------------
-
 const LEARNING_DAYS = 14;
 const LEARNING_MIN_LEADS = 30;
 const LEARNING_MIN_PER_PERSONA = 5;
 
-// ---------------------------------------------------------------------------
-// 主入口
-// ---------------------------------------------------------------------------
-
 export interface FeedbackAnalyzerOptions {
-  eventsPath?: string;       // 默认 ./data/feedback/events.jsonl
-  insightsPath?: string;    // 默认 ./data/feedback/weekly-insights.json
-  channelsPath?: string;     // 默认 business/channels.yaml
-  weeks?: number;            // 参考过去几周数据（默认 4）
+  eventsPath?: string;
+  insightsPath?: string;
+  channelsPath?: string;
+  weeks?: number;
 }
 
 export async function runWeeklyAnalysis(
@@ -49,20 +32,16 @@ export async function runWeeklyAnalysis(
   const eventsPath = opts.eventsPath ?? './data/feedback/events.jsonl';
   const insightsPath = opts.insightsPath ?? './data/feedback/weekly-insights.json';
 
-  // 1. 加载 events
   const events = await loadEvents(eventsPath);
 
-  // 2. 学习期检查
   const stats = computeStats(events);
   const learningComplete = isLearningPeriodComplete(stats);
 
-  // 3. 计算各维度（无论学习期是否完成都计算，用于展示）
   const keywordPerf = learningComplete ? computeKeywordAttribution(events).performance : [];
   const hookStylePerf = computeHookStyleAttribution(events).performance;
   const personaVal = computePersonaValue(events).values;
   const bestTimes = computeInteractionTime(events).times;
 
-  // 4. 构建 insights
   const insights: WeeklyInsights = {
     week_start: getWeekStart(),
     learning_period_complete: learningComplete,
@@ -73,11 +52,9 @@ export async function runWeeklyAnalysis(
     generated_at: new Date().toISOString(),
   };
 
-  // 5. 写 insights
   await mkdir(dirname(insightsPath), { recursive: true });
   await writeFile(insightsPath, JSON.stringify(insights, null, 2), 'utf-8');
 
-  // 6. 回路 1：自动写回 channels.yaml 关键词权重（学习期完成后 + auto_apply 的）
   if (learningComplete && keywordPerf.length > 0) {
     await applyKeywordWeights(keywordPerf, opts.channelsPath);
   }
@@ -85,17 +62,10 @@ export async function runWeeklyAnalysis(
   return insights;
 }
 
-/**
- * 分析单维度（供 CLI 调用）
- */
 export async function analyzeKeywordPerformance(opts: FeedbackAnalyzerOptions = {}): Promise<KeywordPerformance[]> {
   const events = await loadEvents(opts.eventsPath ?? './data/feedback/events.jsonl');
   return computeKeywordAttribution(events).performance;
 }
-
-// ---------------------------------------------------------------------------
-// §1 学习期检查
-// ---------------------------------------------------------------------------
 
 function isLearningPeriodComplete(stats: ReturnType<typeof computeStats>): boolean {
   return stats.daysSinceStart >= LEARNING_DAYS
@@ -132,10 +102,6 @@ function computeStats(events: LeadEvent[]): SystemStats {
   };
 }
 
-// ---------------------------------------------------------------------------
-// 工具
-// ---------------------------------------------------------------------------
-
 async function loadEvents(path: string): Promise<LeadEvent[]> {
   try {
     const raw = await readFile(path, 'utf-8');
@@ -153,10 +119,6 @@ async function loadEvents(path: string): Promise<LeadEvent[]> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 回路 1：写回 channels.yaml 关键词权重
-// ---------------------------------------------------------------------------
-
 async function applyKeywordWeights(
   performance: KeywordPerformance[],
   channelsPath?: string,
@@ -165,7 +127,6 @@ async function applyKeywordWeights(
   try {
     const yaml = await import('yaml');
     const raw = await readFile(path, 'utf-8');
-    // 用 parseDocument 保留注释（yaml.parse + yaml.stringify 会丢注释）
     const doc = yaml.parseDocument(raw);
     const config = doc.toJSON() as {
       search?: {
@@ -183,7 +144,6 @@ async function applyKeywordWeights(
     const wMax = config.search.weight_max ?? 3.0;
     const cooldownWeeks = config.search.weight_cooldown_weeks ?? 3;
 
-    // weight_meta 记录每个关键词的调整历史（写在 channels.yaml 里）
     if (!config.search.weight_meta) config.search.weight_meta = {};
     const meta = config.search.weight_meta;
 
@@ -206,12 +166,10 @@ async function applyKeywordWeights(
       const consecutiveWeeks = sameDirection ? Math.abs(lastDir) : 0;
 
       if (consecutiveWeeks >= cooldownWeeks) {
-        // 冷却中：跳过本周，重置计数
         meta[kw.keyword] = { last_adjusted_week: currentWeek, consecutive_direction: 0 };
         continue;
       }
 
-      // 应用调整
       config.search.keywords[kw.keyword].weight = Math.round(clamped * 100) / 100;
       meta[kw.keyword] = {
         last_adjusted_week: currentWeek,
@@ -221,33 +179,23 @@ async function applyKeywordWeights(
     }
 
     if (changed) {
-      // 把内存中已修改的 config 写回 doc，再用 doc.toString() 输出，保留注释
       doc.set('search', config.search);
       await writeFile(path, doc.toString(), 'utf-8');
       log.info('回路 1：已更新 channels.yaml 关键词权重');
     }
   } catch {
-    // channels.yaml 不存在或不可写，静默跳过
   }
 }
 
 function getWeekStart(): string {
   const d = new Date();
-  const day = d.getUTCDay(); // 0=周日
+  const day = d.getUTCDay();
   d.setUTCDate(d.getUTCDate() - day);
   d.setUTCHours(0, 0, 0, 0);
   return d.toISOString().slice(0, 10);
 }
 
-// ---------------------------------------------------------------------------
-// recordEvent 导出（供其他模块调用）
-// ---------------------------------------------------------------------------
-
 export { recordEvent } from './event-recorder.js';
-
-// ---------------------------------------------------------------------------
-// CLI 入口
-// ---------------------------------------------------------------------------
 
 export async function runCLI(args: string[]): Promise<void> {
   const get = (flag: string) => {

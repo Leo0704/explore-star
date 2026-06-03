@@ -1,6 +1,3 @@
-/**
- * CRM Adapters 索引
- */
 import { CsvCRM } from './csv.js';
 import { FeishuCRM } from './feishu.js';
 import { registerCRM, listCRMs } from '../registry.js';
@@ -9,10 +6,8 @@ import { logger } from '../../core/logger.js';
 const log = logger.child({ module: 'adapters/crm' });
 
 export function registerAll(): void {
-  // CSV：始终注册（开发/调试零配置）
   registerCRM('csv', new CsvCRM('./data/leads.csv'));
 
-  // 飞书：仅在环境变量存在时注册
   if (process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.FEISHU_APP_TOKEN && process.env.FEISHU_TABLE_ID) {
     registerCRM('feishu', new FeishuCRM({
       appToken: process.env.FEISHU_APP_TOKEN,

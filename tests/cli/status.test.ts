@@ -1,14 +1,3 @@
-/**
- * src/cli/status.ts 单元测试
- *
- * 覆盖：
- *   - human 格式输出（7 天 run 数 / 失败率 / 平均耗时 / 错误 top 5）
- *   - json 格式输出
- *   - 0 run 时显示警告 + 退出码 1
- *   - 全部 run completed 时退出码 0
- *   - 有 failed run 时退出码 1
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,8 +26,8 @@ describe('formatStatusHuman', () => {
     const output = formatStatusHuman({ business: 'test', days: 7, entries });
     expect(output).toMatch(/Run 总数/);
     expect(output).toMatch(/失败数/);
-    expect(output).toMatch(/2/);  // 2 runs
-    expect(output).toMatch(/50\.0%/);  // 50% failure
+    expect(output).toMatch(/2/);
+    expect(output).toMatch(/50\.0%/);
   });
 });
 
@@ -61,7 +50,6 @@ describe('decideExitCode', () => {
   });
 
   it('returns 1 when the most recent run is failed', () => {
-    // decideExitCode 看"最近一次 run"——确保 failed 是最新的
     const baseTs = Date.now();
     const entries = [
       makeEntry({ exit_reason: 'completed', started_at: new Date(baseTs - 60_000).toISOString() }),

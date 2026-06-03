@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：watch-bookings
- *
- * 用法: npx explore-star watch-bookings --business <dir>
- *       启动预约监听循环
- */
-
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getCRM } from '../adapters/registry.js';
 import { watchBookings } from '../modules/conversion-engine/booking-listener.js';
@@ -37,17 +30,13 @@ export async function runWatchBookings(args: string[]): Promise<void> {
 
   await registerBuiltins();
 
-  // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
-  // loaded 目前未被直接使用，但保留接口一致性
 
-  // CRM
   const crm = getCRM('csv');
 
   console.log(`[watch-bookings] 启动预约监听 | business=${businessDir} | poll=${pollInterval}ms`);
   console.log('  按 Ctrl+C 终止\n');
 
-  // 启动监听
   await watchBookings({ crm, pollIntervalMs: pollInterval });
 }
 

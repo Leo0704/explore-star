@@ -1,18 +1,3 @@
-/**
- * CRM 同步失败队列（DLQ）消费者
- *
- * 扫描 `data/failed/crm-sync-*.json`，对每条 lead 重试 sync。
- * - 全部成功 → 删除文件
- * - 仍失败 → 累计 retry_count → 归档到 `data/failed/_archive/crm-sync-{date}-run-{n}.json` + 飞书告警
- *
- * 退避策略：1s, 2s, 4s（最多 maxRetries 次，默认 3）
- *
- * 设计要点：
- * - 单条重试（`crm.syncLeads([lead])`），一条失败不影响其它
- * - 不重跑 LLM 分析 / 评论抓取（CLAUDE.md "精准改动"）
- * - 飞书未注册时 fallback console（用 `getNotifier` 链式查询）
- */
-
 import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -22,7 +7,6 @@ import { logger } from '../../core/logger.js';
 
 const log = logger.child({ module: 'crm-sync/dlq' });
 
-// 尝试 lazy import registry（避免循环依赖）；失败时退到 console
 async function resolveNotifier(): Promise<Notifier> {
   try {
     const { getNotifier } = await import('../../adapters/registry.js');
@@ -38,34 +22,20 @@ async function resolveNotifier(): Promise<Notifier> {
 
 export interface ConsumeDlqOptions {
   crm: CRMAdapter;
-  /** 单条 lead 最多重试次数（默认 3） */
   maxRetries?: number;
-  /** 仅模拟，不删除/归档文件，仍调 CRM（默认 false） */
   dryRun?: boolean;
-  /** 失败文件目录（默认 data/failed） */
   failedDir?: string;
-  /** 注入 notifier；不传则用 getNotifier('feishu') → console */
   notifier?: Notifier;
-  /** 注入 sleep（测试用），默认 1s × 2^(attempt-1) */
   sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ConsumeDlqResult {
-  /** 总重试尝试次数（所有 lead 的所有 attempt 之和） */
   retried: number;
-  /** 最终成功的 lead 数 */
   succeeded: number;
-  /** 最终仍失败的 lead 数 */
   failed: number;
-  /** 移动到 _archive 的文件数 */
   archived: number;
-  /** 文件级错误（解析失败 / IO 失败） */
   errors: string[];
 }
-
-// ---------------------------------------------------------------------------
-// 主入口
-// ---------------------------------------------------------------------------
 
 export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqResult> {
   const {
@@ -79,7 +49,6 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
   const result: ConsumeDlqResult = { retried: 0, succeeded: 0, failed: 0, archived: 0, errors: [] };
   const notifier = opts.notifier ?? await resolveNotifier();
 
-  // 扫描所有 crm-sync-{date}.json（排除 _archive 和非 json）
   const files = await listFailedFiles(failedDir);
   if (files.length === 0) {
     log.info({ failedDir }, '没有待重试文件');
@@ -99,7 +68,6 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
       leads = extractLeads(parsed);
       sourceReport = parsed.report;
       if (!Array.isArray(leads) || leads.length === 0) {
-        // 空归档 → 直接删
         if (!dryRun) await unlink(filePath);
         log.info({ file, dryRun }, '空归档，已删除');
         continue;
@@ -109,7 +77,6 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
       continue;
     }
 
-    // 对每条 lead 独立重试
     const succeededLeads: Lead[] = [];
     const failedLeads: Lead[] = [];
     for (const lead of leads) {
@@ -120,14 +87,12 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
         succeededLeads.push(lead);
       } else {
         result.failed++;
-        // 累计 retry_count（从 lead 上读，没有则视为 0）
         const prevCount = (lead as Lead & { retry_count?: number }).retry_count ?? 0;
         failedLeads.push({ ...lead, retry_count: prevCount + attempts } as Lead & { retry_count?: number });
       }
     }
 
     if (failedLeads.length === 0) {
-      // 全部成功 → 删文件
       if (!dryRun) {
         await unlink(filePath);
         log.info({ file, count: leads.length }, '全部重试成功，已删除');
@@ -135,7 +100,6 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
         log.info({ file, count: leads.length }, '全部重试成功（dry-run）');
       }
     } else {
-      // 仍有失败 → 归档 + 告警
       const date = extractDateFromFile(file);
       const archivePath = await nextArchivePath(failedDir, date);
 
@@ -157,7 +121,6 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
         try {
           await unlink(filePath);
         } catch (e) {
-          // 归档已写入成功；unlink 失败时保留源文件（数据不丢失，胜过清掉归档）
           log.warn(
             { file, err: e instanceof Error ? e.message : String(e) },
             'unlink source failed; archive preserved',
@@ -169,7 +132,6 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
       log.info({ file, failed: failedLeads.length, dryRun, archivePath }, '仍有失败');
 
       if (!dryRun) {
-        // 仅在真实归档时告警（避免 dry-run 噪音）
         await notifier.send({
           title: 'CRM 同步 DLQ 告警',
           body: buildAlertBody(file, failedLeads),
@@ -182,16 +144,10 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// 内部
-// ---------------------------------------------------------------------------
-
-/** 默认 sleep：1s, 2s, 4s, 8s ... */
 function defaultSleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** 扫描 crm-sync-{date}.json，排除 _archive 目录和非 json */
 async function listFailedFiles(failedDir: string): Promise<string[]> {
   let entries: string[];
   try {
@@ -204,10 +160,6 @@ async function listFailedFiles(failedDir: string): Promise<string[]> {
     .sort();
 }
 
-/** 兼容两种格式：
- *  - 完整归档：{ archived_at, report, leads: Lead[] }
- *  - 裸数组：Lead[]（手测时 echo 创建的）
- */
 function extractLeads(parsed: unknown): Lead[] {
   if (Array.isArray(parsed)) {
     return parsed as Lead[];
@@ -218,7 +170,6 @@ function extractLeads(parsed: unknown): Lead[] {
   return [];
 }
 
-/** 单条 lead 重试循环：返回 { success, attempts } */
 async function retryLead(
   lead: Lead,
   crm: CRMAdapter,
@@ -232,11 +183,9 @@ async function retryLead(
         return { success: true, attempts: attempt };
       }
     } catch {
-      // CRM 调用本身抛错，视为本轮失败，继续重试
     }
 
     if (attempt < maxRetries) {
-      // 1s, 2s, 4s
       const delay = 1000 * 2 ** (attempt - 1);
       await sleep(delay);
     }
@@ -244,19 +193,16 @@ async function retryLead(
   return { success: false, attempts: maxRetries };
 }
 
-/** 从 `crm-sync-2026-06-02.json` 提取 `2026-06-02` */
 function extractDateFromFile(file: string): string {
   return file.replace(/^crm-sync-/, '').replace(/\.json$/, '');
 }
 
-/** 计算下一个可用的归档文件名：crm-sync-{date}-run-{n}.json */
 async function nextArchivePath(failedDir: string, date: string): Promise<string> {
   const archiveDir = join(failedDir, '_archive');
   let existing: string[] = [];
   try {
     existing = await readdir(archiveDir);
   } catch {
-    // 目录不存在 → 视为无历史
   }
   const pattern = new RegExp(`^crm-sync-${date}-run-(\\d+)\\.json$`);
   const usedNums = existing
@@ -267,7 +213,6 @@ async function nextArchivePath(failedDir: string, date: string): Promise<string>
   return join(archiveDir, `crm-sync-${date}-run-${next}.json`);
 }
 
-/** 构造告警正文 */
 function buildAlertBody(file: string, leads: Array<Lead & { retry_count?: number }>): string {
   const lines: string[] = [
     `失败文件: ${file}`,

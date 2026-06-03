@@ -1,17 +1,3 @@
-/**
- * 关键词归因（§3.11 回路 1：关键词权重）
- *
- * V1.4 实现：
- *   - 从 events.jsonl 聚合关键词转化数据
- *   - 贝叶斯平滑计算建议权重
- *   - 输出 KeywordPerformance[]
- *
- * 归因模型（by design）：last-touch 单触点归因。
- * 每个 LeadEvent 只带一个 keyword 字段，归因到该 lead 转化前最后一个
- * 出现过的 keyword。若需多触点归因（首/末/线性/衰减），需扩展事件结构
- * 携带 keyword 序列后另写一个 attribution 变体。
- */
-
 import type { LeadEvent, KeywordPerformance } from '../../core/types.js';
 
 const BAYESIAN_ALPHA = 10;
@@ -26,9 +12,6 @@ export interface KeywordAttributionResult {
   totalConversions: number;
 }
 
-/**
- * 计算关键词转化效果
- */
 export function computeKeywordAttribution(events: LeadEvent[]): KeywordAttributionResult {
   const byKeyword: Record<string, { leads: Set<string>; conversions: number }> = {};
 

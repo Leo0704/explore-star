@@ -1,9 +1,3 @@
-/**
- * RAG 检索器
- *
- * 从 sqlite-vec 索引中 top-K cosine 相似度检索。
- */
-
 import Database, { type Database as DatabaseType } from 'better-sqlite3';
 import type { EmbeddingProvider } from '../core/types.js';
 import { cosineSimilarity } from './index-builder.js';
@@ -14,14 +8,6 @@ export interface RetrievedDoc {
   score: number;
 }
 
-/**
- * 从已有 sqlite-vec 索引中检索 top-K 相关文档
- *
- * @param query       检索 query 文本
- * @param k           返回条数，默认 3
- * @param dbPath      sqlite-vec 数据库路径
- * @param embeddingProvider  向量模型（用于将 query 向量化）
- */
 export async function retrieveTopK(
   query: string,
   k: number,
@@ -39,7 +25,6 @@ export async function retrieveTopK(
   try {
     db.loadExtension('sqlite-vec');
 
-    // 读取所有向量（V1 规模小，全量扫描足够）
     const rows = db.prepare('SELECT path, content, embedding FROM knowledge_vectors').all() as Array<{
       path: string;
       content: string;
@@ -48,7 +33,6 @@ export async function retrieveTopK(
 
     if (rows.length === 0) return [];
 
-    // 解码 embedding（BLOB → Float32Array → number[]）
     const scored = rows
       .map(row => {
         const emb = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);

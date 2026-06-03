@@ -1,13 +1,3 @@
-/**
- * Qwen Embedding Adapter 单测（Q3）
- *
- * 不发真实请求——mock globalThis.fetch 验证：
- *   1. URL 是 DashScope 兼容接口
- *   2. Auth 头、model 名字、dimensions 参数都对
- *   3. 响应格式按 OpenAI 兼容格式解析
- *   4. embed / embedBatch 都能跑通
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QwenEmbedding } from '../../../src/adapters/embeddings/qwen.js';
 
@@ -55,24 +45,20 @@ describe('QwenEmbedding', () => {
     const e = new QwenEmbedding({ apiKey: 'sk-test' });
     const out = await e.embed('hello');
 
-    // 1. URL 对
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://dashscope.aliyun.com/compatible-mode/v1/embeddings');
 
-    // 2. Headers 对
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
     expect(headers['Authorization']).toBe('Bearer sk-test');
     expect(headers['Content-Type']).toBe('application/json');
 
-    // 3. Body 对
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe('text-embedding-v3');
     expect(body.input).toEqual(['hello']);
     expect(body.dimensions).toBe(1024);
 
-    // 4. 解析响应
     expect(out).toEqual(vec);
     expect(out).toHaveLength(1024);
   });
@@ -117,7 +103,6 @@ describe('QwenEmbedding', () => {
     await e.embed('x');
 
     const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    // 末尾斜杠应被剥掉，避免双斜杠
     expect(url).toBe('https://my-private-qwen.example.com/v1/embeddings');
   });
 

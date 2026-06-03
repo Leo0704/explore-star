@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：convert
- *
- * 用法: npx explore-star convert --business <dir>
- *       单跑转化引擎（转化日报）
- */
-
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getCRM } from '../adapters/registry.js';
 import { generateConversionReport, pushConversionReport } from '../modules/conversion-engine/material-pusher.js';
@@ -39,18 +32,14 @@ export async function runConvert(args: string[]): Promise<void> {
 
   await registerBuiltins();
 
-  // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
   const { profile, conversion } = loaded;
 
-  // CRM
   const crm = getCRM('csv');
 
-  // 生成报告
   const report = await generateConversionReport(date, { profile, conversion, crm });
 
   if (verbose) {
-    // 详细输出（原 conversion-report.ts）
     console.log(`\n📈 探星转化日报 ${report.date}`);
     console.log('\n[今日漏斗]');
     console.log(`  新发现：${report.new_leads}`);
@@ -82,7 +71,6 @@ export async function runConvert(args: string[]): Promise<void> {
       }
     }
   } else {
-    // 精简输出
     console.log(`[convert] 转化日报 ${date}`);
     console.log(`  新发现：${report.new_leads}`);
     console.log(`  加微：${report.new_wechat_added}`);
@@ -93,7 +81,6 @@ export async function runConvert(args: string[]): Promise<void> {
     console.log(`  At Risk：${report.at_risk_leads.length}`);
   }
 
-  // 写文件
   if (outputPath) {
     const { writeFile, mkdir } = await import('node:fs/promises');
     const { dirname } = await import('node:path');

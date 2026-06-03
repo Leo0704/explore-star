@@ -1,9 +1,3 @@
-/**
- * 移动平均（Phase 2 #3 主动学习回路）
- *
- * 30 天窗口聚合 + α=0.3 移动平均 + 冷启动保护（sampleSize<3 保留旧值）
- */
-
 import type { LeadOutcomeEvent } from './outcomes-loader.js';
 
 const WINDOW_DAYS = 30;

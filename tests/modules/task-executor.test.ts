@@ -1,20 +1,11 @@
-/**
- * task-executor 单元测试（§3.6.5）
- *
- * 覆盖：限速/紧急停止/风控信号/mock 浏览器
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { writeFile, unlink, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Task, SafetyConfig, CRMAdapter, LeadStatus } from '../../src/core/types.js';
 
-// 直接导入（不需要 mock）
 import { createRateLimiter, isEmergencyStop, reviewHook } from '../../src/modules/task-executor/index.js';
 
-// Y4：限速器持久化到 data/rate-counters-{YYYY-MM-DD}.json。
-// 测试间必须清掉该文件，否则跨测试的状态泄漏会让限速相关 case 失败。
 function getRateCounterFilePath(): string {
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -72,7 +63,6 @@ function mkTask(overrides: Partial<Task> = {}): Task {
 describe('task-executor', () => {
   describe('loadSafetyConfig', () => {
     it('返回默认配置结构', () => {
-      // 测试配置结构
       expect(mockConfig.rate_limits.douyin.friend_request_per_day).toBe(5);
       expect(mockConfig.rate_limits.douyin.dm_per_day).toBe(10);
       expect(mockConfig.rate_limits.min_interval_seconds).toBe(3);
@@ -83,30 +73,24 @@ describe('task-executor', () => {
   describe('限速器', () => {
     it('记录好友请求次数', () => {
       const limiter = createRateLimiter();
-      expect(limiter.canFriendRequest(mockConfig)).toBe(true);  // 0 < 5 → true
-      limiter.recordFriendRequest();
-      // 1 < 5 → true (还没达到上限)
       expect(limiter.canFriendRequest(mockConfig)).toBe(true);
-      // 再记录 4 次（共 5 次）达到上限
+      limiter.recordFriendRequest();
+      expect(limiter.canFriendRequest(mockConfig)).toBe(true);
       for (let i = 0; i < 4; i++) {
         limiter.recordFriendRequest();
       }
-      // 5 < 5 → false (达到上限)
       expect(limiter.canFriendRequest(mockConfig)).toBe(false);
     });
 
     it('记录私信次数', () => {
       const limiter = createRateLimiter();
-      expect(limiter.canDm(mockConfig)).toBe(true);  // 0 < 10 → true
-      limiter.recordDm();
-      limiter.recordDm();
-      // 2 < 10 → true (还没达到上限)
       expect(limiter.canDm(mockConfig)).toBe(true);
-      // 再记录 8 次（共 10 次）达到上限
+      limiter.recordDm();
+      limiter.recordDm();
+      expect(limiter.canDm(mockConfig)).toBe(true);
       for (let i = 0; i < 8; i++) {
         limiter.recordDm();
       }
-      // 10 < 10 → false (达到上限)
       expect(limiter.canDm(mockConfig)).toBe(false);
     });
 
@@ -204,22 +188,10 @@ describe('50 mock leads 30天模拟', () => {
       }
     }
 
-    // 70% 推进概率，30 天后大多数应该推进
     expect(advancedCount).toBeGreaterThan(50);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 9-阶段端到端测试（executeTasks）
-//
-// 这里通过 vi.doMock + vi.resetModules 注入 mock 的 browser-actions 和
-// hook-review，让 executeTasks 走完全部 9 阶段但不发请求。
-// ---------------------------------------------------------------------------
-
-/**
- * 构造一个最小化 puppeteer-core.Browser fake，供 __fakeBrowser 路径使用
- * （executeBrowserActionWithBrowser 需要 browser.newPage() 不会抛错）
- */
 function makeFakeBrowser() {
   const page = {
     goto: vi.fn().mockResolvedValue(undefined),
@@ -236,9 +208,6 @@ function makeFakeBrowser() {
   } as unknown as import('puppeteer-core').Browser;
 }
 
-/**
- * 共享的 browser-actions mock —— 给 executeTasks 9-阶段端到端 + Finding 2 测试复用
- */
 const browserActionsMock = {
   executeBrowserAction: vi.fn(async (task: Task) => ({
     task_id: task.task_id,
@@ -253,9 +222,6 @@ const browserActionsMock = {
   sendDirectMessage: vi.fn(async () => ({ ok: true })),
 };
 
-/**
- * 给定 action 构造一个最小 task
- */
 function makeE2ETask(overrides: Partial<Task> = {}): Task {
   return {
     task_id: `t_${Math.random().toString(36).slice(2)}`,
@@ -267,7 +233,7 @@ function makeE2ETask(overrides: Partial<Task> = {}): Task {
     hook_style: 'default',
     priority: 'medium',
     persona: 'self_media',
-    scheduled_at: new Date(Date.now() - 1000).toISOString(), // 默认已到点
+    scheduled_at: new Date(Date.now() - 1000).toISOString(),
     reason: 'E2E',
     video_url: 'https://douyin.com/video/123',
     ...overrides,
@@ -275,8 +241,6 @@ function makeE2ETask(overrides: Partial<Task> = {}): Task {
 }
 
 describe('executeTasks 9-阶段端到端', () => {
-  // mock browser-actions（含 likeAndFollow 等所有动作的占位实现）
-  // 提到模块顶层供 Finding 2 测试块复用
   beforeEach(() => {
     vi.resetModules();
     vi.doMock('../../src/modules/task-executor/browser-actions.js', () => browserActionsMock);
@@ -293,17 +257,12 @@ describe('executeTasks 9-阶段端到端', () => {
     vi.resetModules();
   });
 
-  // -------------------------------------------------------------------------
-  // (a) emergency_stop file → 第一个 task 抛错，后续 task 不被处理
-  // -------------------------------------------------------------------------
   it('(a) emergency_stop 开关启用时，executeTasks 在第一个 task 前抛错', async () => {
-    // 创建一个唯一路径的 emergency_stop 开关
     const stopFile = './data/tmp/EMERGENCY_STOP_e2e_test_a';
     await mkdir('./data/tmp', { recursive: true });
     await writeFile(stopFile, 'STOP', 'utf-8');
 
     try {
-      // 用 vi.doMock 注入 hook-review（防止被飞书真实调用）
       vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
         reviewHook: vi.fn().mockResolvedValue({ approved: true }),
         needsReview: vi.fn().mockReturnValue(false),
@@ -326,10 +285,8 @@ describe('executeTasks 9-阶段端到端', () => {
 
       const tasks: Task[] = [makeE2ETask({ task_id: 'tA1' }), makeE2ETask({ task_id: 'tA2' })];
 
-      // executeTasks 应在第一个 task 之前 throw（throwIfEmergencyStop 在循环开头）
       await expect(executeTasks(tasks, config)).rejects.toThrow(/紧急停止/);
 
-      // 浏览器动作应从未被调用
       expect(browserActionsMock.executeBrowserAction).not.toHaveBeenCalled();
     } finally {
       if (existsSync(stopFile)) {
@@ -338,9 +295,6 @@ describe('executeTasks 9-阶段端到端', () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // (b) scheduled_at = future + 100ms → 至少耗时 100ms
-  // -------------------------------------------------------------------------
   it('(b) task.scheduled_at 在未来 100ms 时，executeTasks 至少耗时 100ms', async () => {
     vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
       reviewHook: vi.fn().mockResolvedValue({ approved: true }),
@@ -354,7 +308,7 @@ describe('executeTasks 9-阶段端到端', () => {
     const config: SafetyConfig = {
       rate_limits: {
         douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
-        min_interval_seconds: 0, // 跳过真人节律等待，否则会 3-8s
+        min_interval_seconds: 0,
         max_interval_seconds: 0,
       },
       daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
@@ -372,16 +326,11 @@ describe('executeTasks 9-阶段端到端', () => {
     const results = await executeTasks(tasks, config);
     const elapsed = Date.now() - t0;
 
-    // 阶段 2 等待 scheduled_at → 至少 100ms
     expect(elapsed).toBeGreaterThanOrEqual(100);
-    // mock 浏览器 → 成功
     expect(results).toHaveLength(1);
     expect(results[0].result).toBe('executed_with_response');
   });
 
-  // -------------------------------------------------------------------------
-  // (c) rateLimiter dm_today 已满 → 该 task result='skipped'，error 含 "今日"
-  // -------------------------------------------------------------------------
   it('(c) dm 限额已满时，task result=skipped 且 error_message 含 "今日"', async () => {
     vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
       reviewHook: vi.fn().mockResolvedValue({ approved: true }),
@@ -391,7 +340,6 @@ describe('executeTasks 9-阶段端到端', () => {
 
     const { executeTasks } = await import('../../src/modules/task-executor/index.js');
 
-    // executeTasks 内部每次调用都新建一个 rateLimiter，所以必须 11 个 task 一次传入
     const config: SafetyConfig = {
       rate_limits: {
         douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
@@ -404,32 +352,24 @@ describe('executeTasks 9-阶段端到端', () => {
       hook_review: false,
     };
 
-    // 11 个 DM：前 10 个成功，dm_today 0→10；第 11 个应被 skip
     const tasks: Task[] = Array.from({ length: 11 }, (_, i) =>
       makeE2ETask({ task_id: `tDM${i}`, next_action: 'dm', user_sec_uid: 'sec_1' })
     );
     const results = await executeTasks(tasks, config);
 
-    // 浏览器动作应被调用 10 次（第 11 个不调，因为被 break 跳过）
     expect(browserActionsMock.executeBrowserAction).toHaveBeenCalledTimes(10);
 
-    // 第 11 个（tDM10）应是 skipped
     const last = results[results.length - 1];
     expect(last.task_id).toBe('tDM10');
     expect(last.result).toBe('skipped');
     expect(last.error_message).toMatch(/今日/);
 
-    // 前 10 个应成功
     for (let i = 0; i < 10; i++) {
       expect(results[i].result).toBe('executed_with_response');
     }
   });
 
-  // -------------------------------------------------------------------------
-  // (d) reviewHook returns approved=false → task 被 skip，rateLimiter 计数未增加
-  // -------------------------------------------------------------------------
   it('(d) reviewHook approved=false 时，task 被 skip 且 rateLimiter 不计数', async () => {
-    // mock hook-review：返回 approved=false
     vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
       reviewHook: vi.fn().mockResolvedValue({ approved: false, reason: '人工跳过/拒绝' }),
       needsReview: vi.fn().mockReturnValue(true),
@@ -447,10 +387,9 @@ describe('executeTasks 9-阶段端到端', () => {
       daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
       emergency_stop: 'config/EMERGENCY_STOP',
       fatal_signals: [],
-      hook_review: true, // 启用审核才能让 executeTasks 走到 reviewHook
+      hook_review: true,
     };
 
-    // 用一个独立的 rateLimiter 观察计数（executeTasks 内部用的是新实例，但功能一致）
     const observer = createRateLimiter();
     const dmTask: Task = makeE2ETask({
       task_id: 'tReviewReject',
@@ -460,29 +399,15 @@ describe('executeTasks 9-阶段端到端', () => {
 
     const results = await executeTasks([dmTask], config);
 
-    // 1. 结果是 skip，error_message 含 reason
     expect(results).toHaveLength(1);
     expect(results[0].result).toBe('skipped');
     expect(results[0].error_message).toMatch(/审核|拒绝|跳过/);
-    // 2. 浏览器动作未执行（因为审核未过直接 continue）
     expect(browserActionsMock.executeBrowserAction).not.toHaveBeenCalled();
-    // 3. 观察者 limiter 计数应仍为 0（executeTasks 内部 limiter 也未增）
     expect(observer.getCounters().dm_today).toBe(0);
     expect(observer.getCounters().friend_requests_today).toBe(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Finding 2: executeTasks 末尾按 action 回写 CRM
-//
-// 验证：
-//   (F2-1) crm.updateStatus 被调用 1 次/task，传入 (cid, newState)，
-//          newState 从 STATE_TRANSITIONS[task.next_action].new_state 推断
-//   (F2-2) 多个 task 时，crm.updateStatus 被调对应次数
-//   (F2-3) crm.updateStatus 抛错时主流程不中断（results 仍有 1 个，task 仍执行）
-// ---------------------------------------------------------------------------
-
-/** 构造一个 spy CRM：updateStatus 调一次记一次 */
 function makeSpyCRM(overrides: Partial<CRMAdapter> = {}): CRMAdapter {
   return {
     syncLeads: vi.fn().mockResolvedValue({ synced: 0, failed: 0, errors: [] }),
@@ -534,7 +459,6 @@ describe('Finding 2: executeTasks 回写 CRM', () => {
       hook_review: false,
     };
 
-    // next_action = like_and_follow → STATE_TRANSITIONS['新发现'].new_state = '已关注'
     const task = makeE2ETask({
       task_id: 'tF2_1',
       lead_cid: 'cid_F2_1',
@@ -570,10 +494,6 @@ describe('Finding 2: executeTasks 回写 CRM', () => {
       hook_review: false,
     };
 
-    // STATE_TRANSITIONS 映射：
-    //   新发现 + like_and_follow  → 已关注
-    //   已关注 + comment_reply    → 已互动
-    //   已互动 + friend_request   → 已加好友
     const tasks: Task[] = [
       makeE2ETask({ task_id: 'tF2_2a', lead_cid: 'cid_a', current_state: '新发现', next_action: 'like_and_follow' }),
       makeE2ETask({ task_id: 'tF2_2b', lead_cid: 'cid_b', current_state: '已关注', next_action: 'comment_reply' }),
@@ -620,26 +540,15 @@ describe('Finding 2: executeTasks 回写 CRM', () => {
       next_action: 'like_and_follow',
     });
 
-    // 不应抛错
     const results = await executeTasks([task], config, { crm });
 
-    // 浏览器动作仍执行
     expect(browserActionsMock.executeBrowserAction).toHaveBeenCalledTimes(1);
-    // updateStatus 被尝试调用
     expect(crm.updateStatus).toHaveBeenCalledTimes(1);
-    // results 仍包含该 task 的执行结果（不被中断）
     expect(results).toHaveLength(1);
     expect(results[0].result).toBe('executed_with_response');
   });
 });
 
-// ---------------------------------------------------------------------------
-// Bug 2 (P0): nextStateForAction 的 order 数组漏了 "已流失"
-//
-// 当 task.current_state === '已流失' 时，order.indexOf('已流失') === -1，
-// 现有代码会"误判 currentIdx > candidateIdx 为 false"而错误地推进状态。
-// 正确行为：已流失是终态，crm.updateStatus 不应被调用。
-// ---------------------------------------------------------------------------
 describe('Bug 2: 已流失 lead 不应被推进状态', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -680,8 +589,6 @@ describe('Bug 2: 已流失 lead 不应被推进状态', () => {
       hook_review: false,
     };
 
-    // 关键：current_state='已流失'，next_action='like_and_follow'，且 action 正常执行
-    // 期望：crm.updateStatus 一次都不被调（已流失是终态，不可推进）
     const task = makeE2ETask({
       task_id: 'tB2_1',
       lead_cid: 'cid_B2_1',
@@ -695,11 +602,6 @@ describe('Bug 2: 已流失 lead 不应被推进状态', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Bug 3 (P0): recordTaskExecuted 的 keyword 传了空串，污染 §3.11 关键词归因
-//
-// 期望：recordTaskExecuted 的 metadata.keyword 应等于 task.source_keyword。
-// ---------------------------------------------------------------------------
 describe('Bug 3: recordTaskExecuted 传真实 keyword', () => {
   const eventRecorderMock = {
     recordEvent: vi.fn().mockResolvedValue(undefined),
@@ -757,13 +659,11 @@ describe('Bug 3: recordTaskExecuted 传真实 keyword', () => {
     });
 
     await executeTasks([task], config);
-    // fire-and-forget: 等 recordTaskExecuted 落地
     await new Promise<void>(resolve => setImmediate(resolve));
 
     expect(eventRecorderMock.recordTaskExecuted).toHaveBeenCalledTimes(1);
     const callArgs = eventRecorderMock.recordTaskExecuted.mock.calls[0];
     expect(callArgs[0]).toBe('cid_B3_1');
-    // 关键：keyword 必须是真实值，不是空串
     expect(callArgs[1].keyword).toBe('AI 副业');
     expect(callArgs[1].keyword).not.toBe('');
   });

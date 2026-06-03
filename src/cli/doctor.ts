@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：doctor
- *
- * 用法: npx explore-star doctor [--business <dir>]
- *       5 类健康检查
- */
-
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
@@ -39,7 +32,6 @@ export async function runDoctor(args: string[]): Promise<void> {
   console.log('🔍 探星医生 v0.1.0\n');
   let pass = 0, warn = 0, fail = 0;
 
-  // 1. Node 版本
   const nodeMajor = parseInt(process.versions.node.split('.')[0]);
   if (nodeMajor >= 20) {
     console.log('  ✅ Node', process.versions.node, '（≥20）');
@@ -49,7 +41,6 @@ export async function runDoctor(args: string[]): Promise<void> {
     fail++;
   }
 
-  // 2. opencli 可用
   try {
     const ver = execSync('opencli --version', { encoding: 'utf-8', timeout: 10000 }).trim();
     console.log('  ✅ opencli', ver);
@@ -59,7 +50,6 @@ export async function runDoctor(args: string[]): Promise<void> {
     warn++;
   }
 
-  // 3. LLM API Key（兼容多 provider：DeepSeek / OpenAI / Anthropic / Ollama）
   if (process.env.DEEPSEEK_API_KEY) {
     console.log('  ✅ DEEPSEEK_API_KEY 已设置');
     pass++;
@@ -77,7 +67,6 @@ export async function runDoctor(args: string[]): Promise<void> {
     fail++;
   }
 
-  // 4. 业务配置
   try {
     await registerBuiltins();
     const loaded = await loadBusinessProfile(businessDir);
@@ -88,7 +77,6 @@ export async function runDoctor(args: string[]): Promise<void> {
     fail++;
   }
 
-  // 5. 已注册 adapter
   const llms = listLLMs();
   const crms = listCRMs();
   const embeds = listEmbeddings();
@@ -108,7 +96,6 @@ export async function runDoctor(args: string[]): Promise<void> {
     warn++;
   }
 
-  // 6. 紧急停止开关（基于 businessDir 派生路径，不再硬编码 CWD）
   const stopPath = businessDir ? join(businessDir, 'config', 'EMERGENCY_STOP') : './config/EMERGENCY_STOP';
   if (existsSync(stopPath)) {
     console.log(`  ❌ 紧急停止开关已启用（${stopPath}）`);
@@ -118,7 +105,6 @@ export async function runDoctor(args: string[]): Promise<void> {
     pass++;
   }
 
-  // 7. 健康检查
   try {
     const health = await checkAll(businessDir);
     console.log('\n' + formatHealthReport(health));

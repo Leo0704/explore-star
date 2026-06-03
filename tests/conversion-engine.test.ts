@@ -1,11 +1,6 @@
-/**
- * ConversionEngine 测试
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Lead, CRMAdapter, ConversionConfig, BusinessProfile } from '../src/core/types.js';
 
-// Mock CRM adapter
 const mockCRM: CRMAdapter = {
   syncLeads: vi.fn().mockResolvedValue({ synced: 1, failed: 0, errors: [] }),
   getLead: vi.fn(),
@@ -39,13 +34,11 @@ const mockProfile: BusinessProfile = {
 
 describe('ConversionEngine', () => {
   beforeEach(async () => {
-    // 注册内置 Notifier（pushMaterial 默认用 console notifier）
     const { registerBuiltins } = await import('../src/adapters/registry.js');
     await registerBuiltins();
     vi.clearAllMocks();
   });
 
-  // Test material-pusher
   describe('pushMaterial', () => {
     it('should skip if wechat_added_at is missing', async () => {
       const { pushMaterial } = await import('../src/modules/conversion-engine/material-pusher.js');
@@ -66,7 +59,7 @@ describe('ConversionEngine', () => {
       const { pushMaterial } = await import('../src/modules/conversion-engine/material-pusher.js');
       const now = new Date();
       const lead = createTestLead({
-        wechat_added_at: new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString(), // 12 hours ago
+        wechat_added_at: new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString(),
       });
 
       const result = await pushMaterial(lead, {
@@ -84,7 +77,7 @@ describe('ConversionEngine', () => {
       const { pushMaterial } = await import('../src/modules/conversion-engine/material-pusher.js');
       const now = new Date();
       const lead = createTestLead({
-        wechat_added_at: new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString(), // 48 hours ago
+        wechat_added_at: new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString(),
         status: '已加微',
       });
 
@@ -98,7 +91,6 @@ describe('ConversionEngine', () => {
       expect(result.pushed).toBe(true);
     });
 
-    // Bug 4 (P0): 物料推送 ≠ 预约。推送物料后不应把状态改为 '已预约'
     it('should NOT change status to 已预约 after pushing material', async () => {
       const { pushMaterial } = await import('../src/modules/conversion-engine/material-pusher.js');
       const now = new Date();
@@ -121,7 +113,6 @@ describe('ConversionEngine', () => {
     });
   });
 
-  // Bug 4 (P0)：handleWechatAdded 同样不应把状态改为 '已预约'
   describe('handleWechatAdded', () => {
     it('should NOT change status to 已预约 after pushing material', async () => {
       const { registerNotifier } = await import('../src/adapters/registry.js');
@@ -148,7 +139,6 @@ describe('ConversionEngine', () => {
     });
   });
 
-  // Test generateConversionReport
   describe('generateConversionReport', () => {
     it('should generate report with correct funnel', async () => {
       const { generateConversionReport } = await import('../src/modules/conversion-engine/material-pusher.js');

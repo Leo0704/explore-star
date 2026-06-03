@@ -1,9 +1,3 @@
-/**
- * 反馈分析器单元测试（§3.11）
- *
- * 覆盖：贝叶斯平滑、风格切换门槛、persona 价值分
- */
-
 import { describe, it, expect } from 'vitest';
 import type { LeadEvent } from '../../src/core/types.js';
 import { computeHookStyleAttribution } from '../../src/modules/feedback-analyzer/hook-style-attribution.js';
@@ -26,12 +20,10 @@ function mkEvent(overrides: Partial<LeadEvent> = {}): LeadEvent {
 describe('反馈分析器算法（spec 对照）', () => {
   describe('§1 学习期', () => {
     it('数据 < 30 → 不出建议', () => {
-      // 仅 10 个 lead，全部 < 5 per persona
       const events: LeadEvent[] = [];
       for (let i = 0; i < 10; i++) {
         events.push(mkEvent({ cid: `c${i}`, persona: 'self_media' }));
       }
-      // 学习期未完成
       const total = new Set(events.map(e => e.cid)).size;
       expect(total).toBeLessThan(30);
     });
@@ -39,12 +31,6 @@ describe('反馈分析器算法（spec 对照）', () => {
 
   describe('§2 贝叶斯平滑', () => {
     it('n=1, c=1 全局 10% → 平滑后非 100%', () => {
-      // 关键词 A: 50 leads, 5 成功
-      // 关键词 B: 1 lead, 1 成功
-      // 全局: 200 leads, 20 成功 → 10%
-      // A 平滑: (5 + 10*0.1) / (50 + 10) = 6/60 = 10.0%
-      // B 平滑: (1 + 10*0.1) / (1 + 10) = 2/11 ≈ 18.2%
-      // B 不应该是 100%
       const alpha = 10;
       const globalRate = 20 / 200;
       const bSmoothed = (1 + alpha * globalRate) / (1 + alpha);
@@ -82,8 +68,8 @@ describe('反馈分析器算法（spec 对照）', () => {
         const p = w * Math.sqrt(ratio);
         return Math.max(MIN, Math.min(MAX, p));
       };
-      expect(proposed(1, 100)).toBe(2.0);  // 上限
-      expect(proposed(1, 0.001)).toBe(0.1);  // 下限
+      expect(proposed(1, 100)).toBe(2.0);
+      expect(proposed(1, 0.001)).toBe(0.1);
       expect(proposed(1, 1)).toBe(1);
       expect(proposed(1, 4)).toBe(2.0);
       expect(proposed(1, 0.25)).toBe(0.5);
@@ -166,7 +152,6 @@ describe('Bug 58: persona-value revenue 必须是 number', () => {
     ];
     const { values } = computePersonaValue(events);
     const v = values.find(x => x.persona === 'self_media')!;
-    // 第二个事件 string revenue 应当被丢弃（视作 0），不与第一个相加
     expect(v.revenue).toBe(100);
     expect(typeof v.revenue).toBe('number');
     expect(Number.isFinite(v.revenue)).toBe(true);

@@ -1,22 +1,3 @@
-/**
- * 状态管理（data/state.json）
- *
- * V1.4 实现：
- *   - loadState / saveState: 读写状态
- *   - updateStep: 更新当前步骤
- *   - markComplete: 标记步骤完成
- *   - withStateLock: load-modify-save 互斥（proper-lockfile）
- *
- * Y3 并发安全：
- *   - 用 proper-lockfile 给 data/state.json 加进程间互斥锁
- *   - 锁文件位于 data/.state.json.lock（不与 state.json 同名避免污染备份）
- *   - 30 秒内获取不到锁直接抛错，不做指数退避
- *
- * 注：V1.4 未实现「断点续传」（即 state.json 标记 currentStep 后下次 run 跳过已完成步骤）。
- * 原因是跨日 / 跨小时的 step 收尾可能涉及外部副作用（CRM 写、notifier 发），
- * 重跑更难审计。如果需要重启用 `--force-restart` 重置 state。
- */
-
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -27,10 +8,10 @@ const log = logger.child({ module: 'state' });
 
 export interface PipelineState {
   date: string;
-  currentStep: number;       // 0-6，对应 7 步
+  currentStep: number;
   steps: StepState[];
-  startedAt: string;          // ISO 8601
-  lastUpdatedAt: string;      // ISO 8601
+  startedAt: string;
+  lastUpdatedAt: string;
   errors: string[];
   completed: boolean;
 }
@@ -49,31 +30,25 @@ const LOCK_FILE = './data/.state.json.lock';
 const LOCK_TIMEOUT_MS = 30_000;
 
 const STEP_NAMES = [
-  'reconnaissance',   // 侦察
-  'analysis',         // 分析
-  'sync',             // 同步
-  'task_generation',  // 任务生成
-  'execution',        // 执行
-  'notification',     // 通知
-  'health_check',     // 健康检查
+  'reconnaissance',
+  'analysis',
+  'sync',
+  'task_generation',
+  'execution',
+  'notification',
+  'health_check',
 ];
 
-/**
- * 加锁执行 load-modify-save。fn 收到当前 state，可原地修改后返回（返回 partial
- * 会被浅合并）。30 秒内拿不到锁直接抛错。
- */
 export async function withStateLock(
   fn: (state: PipelineState) => Promise<Partial<PipelineState>>,
 ): Promise<PipelineState> {
   await mkdir(dirname(STATE_FILE), { recursive: true });
   if (!existsSync(STATE_FILE)) {
-    // proper-lockfile 要求目标文件存在，先落一个空 state
     await writeFile(STATE_FILE, JSON.stringify(createEmptyState(), null, 2), 'utf-8');
   }
 
   let release: () => Promise<void>;
   try {
-    // 30 秒总超时：300 retries × 100ms 固定间隔（无指数退避，简单）
     release = await lockfile.lock(STATE_FILE, {
       lockfilePath: LOCK_FILE,
       realpath: false,
@@ -94,17 +69,10 @@ export async function withStateLock(
     try {
       await release();
     } catch {
-      // 解锁失败不影响业务结果
     }
   }
 }
 
-/**
- * 加载状态（如果不存在则返回空白）。
- *
- * 不加锁：原子 rename 写入保证读到一致快照；上层如需 load-modify-save
- * 请用 withStateLock。
- */
 export async function loadState(): Promise<PipelineState> {
   if (!existsSync(STATE_FILE)) {
     return createEmptyState();
@@ -112,9 +80,6 @@ export async function loadState(): Promise<PipelineState> {
   return loadStateUnlocked();
 }
 
-/**
- * 保存状态（原子写：tmp + rename，加锁防止并发覆盖）
- */
 export async function saveState(state: PipelineState): Promise<void> {
   await withStateLock(async () => state);
 }
@@ -139,9 +104,6 @@ async function saveStateUnlocked(state: PipelineState): Promise<void> {
   await rename(tmp, STATE_FILE);
 }
 
-/**
- * 创建空白状态
- */
 function createEmptyState(): PipelineState {
   const now = new Date().toISOString();
   return {
@@ -155,9 +117,6 @@ function createEmptyState(): PipelineState {
   };
 }
 
-/**
- * 更新当前步骤状态
- */
 export async function updateStep(
   stepIndex: number,
   status: StepState['status'],
@@ -182,9 +141,6 @@ export async function updateStep(
   });
 }
 
-/**
- * 标记整个流程完成
- */
 export async function markComplete(completed: boolean): Promise<PipelineState> {
   return withStateLock(async (state) => {
     state.completed = completed;
@@ -192,9 +148,6 @@ export async function markComplete(completed: boolean): Promise<PipelineState> {
   });
 }
 
-/**
- * 重置状态（新的一天）
- */
 export async function resetForNewDay(): Promise<PipelineState> {
   const now = new Date().toISOString();
   const today = now.slice(0, 10);

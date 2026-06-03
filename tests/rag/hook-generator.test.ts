@@ -1,17 +1,8 @@
-/**
- * RAG 钩子生成器测试
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { generateHook } from '../../src/rag/hook-generator.js';
 import { retrieveTopK, clearCache } from '../../src/rag/retriever.js';
 import type { BusinessProfile, Lead, EmbeddingProvider } from '../../src/core/types.js';
-// P0-G 修复：清模块级 LLM cache，否则测试间串味
 import { _clearMemoryCache } from '../../src/adapters/llm/_cache.js';
-
-// ---------------------------------------------------------------------------
-// mock profile
-// ---------------------------------------------------------------------------
 
 const mockProfile: BusinessProfile = {
   business: {
@@ -31,10 +22,6 @@ const mockProfile: BusinessProfile = {
   crm: { type: 'feishu', config: {} },
   hook_config: { style: '像朋友推荐，不像销售', max_length: 30, language: '中文' },
 };
-
-// ---------------------------------------------------------------------------
-// mock lead
-// ---------------------------------------------------------------------------
 
 function makeLead(overrides: Partial<Lead> = {}): Lead {
   const now = new Date().toISOString();
@@ -69,20 +56,12 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
   };
 }
 
-// ---------------------------------------------------------------------------
-// mock embedding provider
-// ---------------------------------------------------------------------------
-
 const mockEmbeddingProvider: EmbeddingProvider = {
   dimensions: 1536,
   model: 'text-embedding-3-small',
   embed: vi.fn().mockResolvedValue(new Array(1536).fill(0.1)),
   embedBatch: vi.fn().mockResolvedValue([new Array(1536).fill(0.1)]),
 };
-
-// ---------------------------------------------------------------------------
-// 测试：generateHook
-// ---------------------------------------------------------------------------
 
 describe('generateHook 钩子生成', () => {
   const opts = {
@@ -134,20 +113,14 @@ describe('generateHook 钩子生成', () => {
     } as any);
 
     const result = await generateHook(mockProfile, lead, 'reply', opts);
-    // Bug 54: 不再就地修改 lead,通过返回值的 lead 字段承载 hook_style
     expect(result.lead.hook_style).toBeTruthy();
     expect((lead as any).hook_style).toBeUndefined();
   });
 
 });
 
-// ---------------------------------------------------------------------------
-// 测试：retrieveTopK 检索
-// ---------------------------------------------------------------------------
-
 describe('retrieveTopK 检索', () => {
   it('db 目录不存在时返回空数组', async () => {
-    // 当目录不存在时 better-sqlite3 抛出 TypeError
     const docs = await retrieveTopK(
       'AI 剪辑',
       3,
@@ -158,25 +131,18 @@ describe('retrieveTopK 检索', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 测试：cosine similarity 排序
-// ---------------------------------------------------------------------------
-
 describe('cosine similarity', () => {
   it('相似度计算正确', async () => {
     const { cosineSimilarity } = await import('../../src/rag/index-builder.js');
 
-    // 相同向量：相似度 = 1
     const a = [0.1, 0.2, 0.3];
     const b = [0.1, 0.2, 0.3];
     expect(cosineSimilarity(a, b)).toBeCloseTo(1.0);
 
-    // 正交向量：相似度 ≈ 0
     const c = [1, 0, 0];
     const d = [0, 1, 0];
     expect(cosineSimilarity(c, d)).toBeCloseTo(0.0);
 
-    // 相反向量：相似度 = -1
     const e = [1, 0, 0];
     const f = [-1, 0, 0];
     expect(cosineSimilarity(e, f)).toBeCloseTo(-1.0);

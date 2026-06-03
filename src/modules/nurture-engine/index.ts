@@ -1,13 +1,3 @@
-/**
- * 引导引擎（§3.6）
- *
- * 状态机 + 互动感知 + 智能放弃判定 + 再激活
- *
- * 状态机：
- *   新发现 → 已关注 → 已互动 → 已加好友 → 已加微 → 已预约 → 已成交
- *                                  ↘ 已流失 / 沉默 / 已再激活
- */
-
 import type { Lead, LeadStatus, Task, TaskAction, BusinessProfile, ConversionConfig, WeeklyInsights } from '../../core/types.js';
 import { recordStatusChange } from '../feedback-analyzer/event-recorder.js';
 import { checkAbandonment, checkOptOut } from './smart-abandon.js';
@@ -19,22 +9,13 @@ const log = logger.child({ module: 'nurture-engine' });
 export interface NurtureEngineOptions {
   profile: BusinessProfile;
   conversion: ConversionConfig;
-  /** 每天最多生成多少任务（默认 20） */
   dailyTaskLimit?: number;
-  /** 同一客户两次任务间隔（小时，默认 24） */
   minIntervalHours?: number;
-  /** 同一客户 0 回应上限（默认 3 → 标记流失） */
   noResponseLimit?: number;
-  /** 沉默天数（默认 30） */
   dormantDays?: number;
-  /** §3.11 反馈分析器输出（用于 persona 排序 + 最佳时段） */
   insights?: WeeklyInsights | null;
 }
 
-
-// ---------------------------------------------------------------------------
-// 主入口：生成每日任务
-// ---------------------------------------------------------------------------
 
 export function generateDailyTasks(
   leads: Lead[],
@@ -48,8 +29,6 @@ export function generateDailyTasks(
   const tasks: Task[] = [];
   const now = Date.now();
 
-  // 优先级：按 §3.11 persona value_score 降序 → 高价值 lead 优先
-  // 优先读 weekly-insights.json 的 persona_value（回路 3），fallback 到 profile 静态值
   const personaValueMap = new Map<string, number>();
   if (opts.insights?.persona_value) {
     for (const pv of opts.insights.persona_value) {
@@ -65,23 +44,17 @@ export function generateDailyTasks(
   for (const lead of sortedLeads) {
     if (tasks.length >= limit) break;
 
-    // 1. 检查互动感知 + 智能放弃（§3.6.2 / §3.6.3）
-    // 统一由 checkAbandonment 处理：opt_out / 被拒 / 0 回应 / 沉默 / 60 天归档
     applyInteractionFeedback(lead, noRespLimit, dormantDays);
 
-    // 2. 跳过终态
     if (['已成交', '已流失'].includes(lead.status)) continue;
 
-    // 4. 检查任务间隔
     if (lead.last_task_executed_at) {
       const lastExec = new Date(lead.last_task_executed_at).getTime();
       if (now - lastExec < minIntervalMs) continue;
     }
 
-    // 5. 根据状态生成任务（委托给 state-machine.ts 的 buildTask）
     const task = buildTask(lead, opts.profile);
     if (task) {
-      // 回路 4：按 persona 最佳互动时段安排推送时间
       task.scheduled_at = pickBestTime(opts.insights, lead.persona);
       tasks.push(task);
     }
@@ -90,17 +63,11 @@ export function generateDailyTasks(
   return tasks;
 }
 
-// ---------------------------------------------------------------------------
-// §3.6.2 互动效果感知
-// ---------------------------------------------------------------------------
-
 function applyInteractionFeedback(lead: Lead, noRespLimit: number, dormantDays: number): void {
-  // F11 修复：委托给 checkAbandonment 统一处理 opt_out / 被拒 / 0 回应
   const result = checkAbandonment(lead, noRespLimit, dormantDays);
   if (!result.shouldAbandon || !result.newStatus) return;
 
   if (result.newStatus === '已流失') {
-    // 命中拒绝词（opt_out 信号）→ 同时打 opt_out=true
     if (checkOptOut(lead.last_response_text)) {
       lead.opt_out = true;
     }
@@ -110,10 +77,6 @@ function applyInteractionFeedback(lead: Lead, noRespLimit: number, dormantDays: 
   }
 }
 
-
-// ---------------------------------------------------------------------------
-// §3.6.4 再激活
-// ---------------------------------------------------------------------------
 
 export function findReactivatableLeads(leads: Lead[], dormantDays: number = 30): Lead[] {
   const cutoffMs = dormantDays * 24 * 60 * 60 * 1000;
@@ -148,7 +111,6 @@ function markStatus(lead: Lead, to: LeadStatus, note?: string, overrides?: { hoo
   lead.status = to;
   lead.status_history.push({ from, to, at: new Date().toISOString(), note });
   lead.updated_at = new Date().toISOString();
-  // 接入事件记录器（不阻塞状态机，错误吞掉避免影响主流程）
   const metadata: Parameters<typeof recordStatusChange>[3] = {
     keyword: lead.keyword ?? '',
     hook_style: lead.hook_style ?? 'default',
@@ -156,7 +118,6 @@ function markStatus(lead: Lead, to: LeadStatus, note?: string, overrides?: { hoo
     persona: lead.persona,
     interaction_time: lead.last_interaction_at ?? new Date().toISOString(),
   };
-  // Loop 3: 已成交时把营收写入 metadata
   if (to === '已成交' && (overrides?.revenue ?? lead.revenue)) {
     metadata.metadata = { revenue: overrides?.revenue ?? lead.revenue };
   }
@@ -167,10 +128,6 @@ function getPersonaValue(profile: BusinessProfile, personaId: string): number {
   return profile.target_personas.find(p => p.id === personaId)?.value_score ?? 5.0;
 }
 
-/**
- * 回路 4：根据 persona 最佳互动时段选择 scheduled_at
- * 无 insights 或无该 persona 数据时 fallback 到明天 09:30
- */
 function pickBestTime(insights: WeeklyInsights | null | undefined, personaId: string): string {
   const bestTimes = insights?.best_interaction_times;
   if (!bestTimes || bestTimes.length === 0) {
@@ -180,12 +137,10 @@ function pickBestTime(insights: WeeklyInsights | null | undefined, personaId: st
   if (!personaTime || personaTime.hours.length === 0) {
     return nextDefaultTime();
   }
-  // 取 sample 最大的 top-3 时段，随机选一个（分散同 persona 任务）
   const topHours = [...personaTime.hours]
     .sort((a, b) => b.sample - a.sample)
     .slice(0, 3);
   const picked = topHours[Math.floor(Math.random() * topHours.length)];
-  // 找下一个匹配 weekday + hour 的时间点
   const now = new Date();
   for (let d = 0; d < 7; d++) {
     const candidate = new Date(now);
@@ -203,10 +158,6 @@ function nextDefaultTime(): string {
   t.setHours(9, 30, 0, 0);
   return t.toISOString();
 }
-
-// ---------------------------------------------------------------------------
-// CLI 入口
-// ---------------------------------------------------------------------------
 
 export async function runCLI(args: string[]): Promise<void> {
   const get = (flag: string) => {

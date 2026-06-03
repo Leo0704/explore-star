@@ -1,15 +1,3 @@
-/**
- * src/core/notifier-resolver.ts 单元测试
- *
- * 覆盖：
- *   - 默认 channels = ['console']
- *   - profile.yaml 没 observability.notifier 时用默认
- *   - profile.yaml 配 channels: ['feishu'] 时只解析 feishu
- *   - 配置的 channel 没注册 → log warn 跳过，**不**抛
- *   - 全部 channel 失败 → 兜底 console
- *   - 全空 channels 数组 → 抛错（明示用户配错）
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { BusinessProfile, Notifier } from '../../src/core/types.js';
 

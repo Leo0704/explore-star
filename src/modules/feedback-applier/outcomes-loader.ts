@@ -1,12 +1,3 @@
-/**
- * outcomes 加载器（Phase 2 #3 主动学习回路）
- *
- * 责任：
- *   - 读 data/feedback/outcomes.jsonl（append-only JSONL）
- *   - 逐行 zod 校验，失败行 log warn + 跳过
- *   - 过滤：confidence<0.6 / days_to_outcome>180 / 30 天窗口外
- */
-
 import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { logger } from '../../core/logger.js';

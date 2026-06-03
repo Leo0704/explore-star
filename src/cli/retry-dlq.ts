@@ -1,11 +1,3 @@
-/**
- * CLI 子命令：retry-dlq
- *
- * 用法: npx explore-star retry-dlq [--dry-run] [--max-retries <n>] [--crm <type>] [--crm-config <path>] [--failed-dir <path>]
- *       消费 `data/failed/crm-sync-*.json`，逐条重试 CRM 同步
- *       适合 cron 周期跑：例如 `0 * * * * npx explore-star retry-dlq`
- */
-
 import { readFile } from 'node:fs/promises';
 import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 import { registerBuiltins, getNotifier } from '../adapters/registry.js';
@@ -39,7 +31,6 @@ function resolveNotifier(): Notifier {
   try {
     return getNotifier('feishu');
   } catch {
-    // 飞书未注册（缺 FEISHU_WEBHOOK_URL）→ fallback console
     return getNotifier('console');
   }
 }
@@ -68,7 +59,6 @@ export async function runRetryDlq(args: string[]): Promise<void> {
   const maxRetriesRaw = extractFlag(args, '--max-retries');
   const maxRetries = maxRetriesRaw ? Math.max(1, parseInt(maxRetriesRaw, 10)) : 3;
   const crmType = extractFlag(args, '--crm') ?? 'csv';
-  // csv 用本地默认路径兜底（最简 CRM 类型）；其他类型必须显式指定 --crm-config
   const crmConfigPath = extractFlag(args, '--crm-config')
     ?? (crmType === 'csv' ? './data/leads.csv' : null);
   if (!crmConfigPath) {
@@ -100,7 +90,6 @@ export async function runRetryDlq(args: string[]): Promise<void> {
     log.error({ errors: result.errors }, '文件级错误');
   }
 
-  // 有失败 → 退出码 1，让 cron 能感知
   if (result.failed > 0 || result.errors.length > 0) {
     process.exit(1);
   }

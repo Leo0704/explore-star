@@ -1,20 +1,11 @@
-/**
- * OpenAI 兼容 LLM Provider
- *
- * 同时实现 OpenAI 和 DeepSeek（两者都是 OpenAI 兼容 API）。
- * V1.4 默认 DeepSeek（国内直连 + 便宜），可降级到 OpenAI/Anthropic/Ollama。
- */
-
 import type { LLMOptions, LLMProvider } from '../../core/types.js';
 import { fetchWithRetry } from './_retry.js';
 
 export interface OpenAICompatibleOptions {
   apiKey: string;
-  baseUrl?: string;        // 默认 https://api.openai.com/v1
+  baseUrl?: string;
   model: string;
-  /** 用于日志/计费 */
   displayName?: string;
-  /** 定价（美元/百万 token），用于 ROI 估算 */
   pricing?: { inputPerMTok: number; outputPerMTok: number; embedPerMTok?: number };
 }
 

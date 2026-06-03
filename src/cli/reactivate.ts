@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：reactivate
- *
- * 用法: npx explore-star reactivate --business <dir> [--cid <cid>]
- *       再激活沉默客户
- */
-
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getCRM } from '../adapters/registry.js';
 import { reactivateLead as doReactivate, reactivateDormantPool, findDormantLeads } from '../modules/conversion-engine/index.js';
@@ -35,15 +28,12 @@ export async function runReactivate(args: string[]): Promise<void> {
 
   await registerBuiltins();
 
-  // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
   const { profile, conversion } = loaded;
 
-  // CRM
   const crm = getCRM(loaded.profile.crm.type);
 
   if (cid) {
-    // 单个再激活
     const lead = await crm.getLead(cid);
     if (!lead) {
       console.error(`错误：找不到 lead ${cid}`);
@@ -58,7 +48,6 @@ export async function runReactivate(args: string[]): Promise<void> {
       console.log('  → dry-run 模式，跳过实际发送');
     }
   } else {
-    // 批量再激活沉默池
     const dormant = await findDormantLeads({ crm, conversion });
     console.log(`[reactivate] 沉默池：${dormant.length} 个客户待再激活`);
 

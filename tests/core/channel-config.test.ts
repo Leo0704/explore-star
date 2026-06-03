@@ -1,12 +1,3 @@
-/**
- * channel-config 单元测试 —— ChannelQpsLimit / ChannelDailyQuota schema
- *
- * 覆盖（roadmap §2.5）：
- *   - schema 类型导出存在
- *   - registry 暴露 getChannelQps / getChannelDailyQuota
- *   - yaml 节点缺失时返回默认值（不阻塞）
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -15,7 +6,6 @@ import { tmpdir } from 'node:os';
 describe('schema 导出（types.ts）', () => {
   it('types.ts 导出 ChannelQpsLimit / ChannelDailyQuota', async () => {
     const types = await import('../../src/core/types.js');
-    // 编译期检查（运行期是 type-only 验证）
     const sample: import('../../src/core/types.js').ChannelQpsLimit = { qps: 1, burst: 2 };
     expect(sample.qps).toBe(1);
     const quota: import('../../src/core/types.js').ChannelDailyQuota = {
@@ -43,7 +33,6 @@ describe('registry.getChannelQps', () => {
   it('默认 qps=1（yaml 节点缺失时不阻塞）', async () => {
     process.env.EXPLORE_STAR_CHANNELS_PATH = join(tmpDir, 'missing.yaml');
     const { getChannelQps } = await import('../../src/adapters/registry.js');
-    // 重新加载（清缓存）—— 通过动态 require 模拟首次调用
     const qps = getChannelQps('douyin');
     expect(qps).toBe(1);
   });

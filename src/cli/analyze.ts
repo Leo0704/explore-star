@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：analyze
- *
- * 用法: npx explore-star analyze --business <dir> --input <file> --output <file> --threshold <n>
- *       单跑意图分析
- */
-
 import { readFile } from 'node:fs/promises';
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getLLM } from '../adapters/registry.js';
@@ -47,7 +40,6 @@ export async function runAnalyze(args: string[]): Promise<void> {
 
   await registerBuiltins();
 
-  // 加载输入
   const raw = await readFile(inputPath, 'utf-8');
   let comments: Comment[];
   try {
@@ -57,10 +49,8 @@ export async function runAnalyze(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);
 
-  // 分析
   const result = await analyzeComments(comments, {
     profile: loaded.profile,
     promptsDir: loaded.promptsDir,

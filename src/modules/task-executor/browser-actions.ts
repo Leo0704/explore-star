@@ -1,24 +1,8 @@
-/**
- * 浏览器动作 —— 基于 vendored opencli BrowserBridge
- *
- * 所有操作使用已验证的抖音 DOM 选择器 + 人类节奏随机延迟。
- *
- * 选择器验证记录（2026-06-02）：
- *   - 评论输入框: `.public-DraftEditor-content`（需先点击"回复"按钮）
- *   - 发送按钮: `span.FbVIhLlK.Law8JZNu`（红色箭头）
- *   - 关注按钮: `button:has-text("关注")` → `.semi-button-primary`
- *   - 评论回复按钮: `div.riDGlQZm`（每条评论下的"回复"文字）
- */
-
 import type { Task } from '../../core/types.js';
 import type { ExecutionResult, RiskSignal } from './index.js';
 import { logger } from '../../core/logger.js';
 
 const log = logger.child({ module: 'browser-actions' });
-
-// ---------------------------------------------------------------------------
-// 风控信号
-// ---------------------------------------------------------------------------
 
 const SIGNAL_ACTIONS: Record<string, RiskSignal['action']> = {
   captcha: 'pause_1h',
@@ -30,19 +14,10 @@ function createRiskSignal(type: RiskSignal['type']): RiskSignal {
   return { type, count: 1, action: SIGNAL_ACTIONS[type] ?? 'pause_1h' };
 }
 
-// ---------------------------------------------------------------------------
-// 人类节奏延迟工具
-// ---------------------------------------------------------------------------
-
-/** 随机延迟 min-max 毫秒 */
 async function humanDelay(minMs: number, maxMs: number): Promise<void> {
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
   await new Promise(r => setTimeout(r, ms));
 }
-
-// ---------------------------------------------------------------------------
-// BrowserBridge 懒加载
-// ---------------------------------------------------------------------------
 
 let _bridge: any = null;
 let _page: any = null;
@@ -64,12 +39,8 @@ export async function disconnectBrowser(): Promise<void> {
       _bridge = null;
       _page = null;
     }
-  } catch { /* ignore */ }
+  } catch {}
 }
-
-// ---------------------------------------------------------------------------
-// 风控检测
-// ---------------------------------------------------------------------------
 
 async function detectRisk(page: any): Promise<RiskSignal | null> {
   const hasRisk = await page.evaluate(`(() => {
@@ -81,27 +52,18 @@ async function detectRisk(page: any): Promise<RiskSignal | null> {
   return hasRisk ? createRiskSignal(hasRisk) : null;
 }
 
-// ---------------------------------------------------------------------------
-// 4 个 Action 实现（用 BrowserBridge + 验证过的选择器）
-// ---------------------------------------------------------------------------
-
-/**
- * 点赞 + 关注作者
- */
 export async function likeAndFollow(videoUrl: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
   const page = await getPage();
   try {
     await page.goto(videoUrl);
-    await humanDelay(3000, 6000);  // 等页面加载，模拟浏览
+    await humanDelay(3000, 6000);
 
-    // 点赞
     await page.evaluate(`(() => {
       const btn = document.querySelector('[data-e2e="browse-like"]') || document.querySelector('[class*="like-btn"]');
       if (btn) btn.click();
     })()`);
     await humanDelay(2000, 4000);
 
-    // 关注
     await page.evaluate(`(() => {
       const btns = document.querySelectorAll('button');
       for (const btn of btns) {
@@ -123,23 +85,18 @@ export async function likeAndFollow(videoUrl: string): Promise<{ ok: boolean; ri
   }
 }
 
-/**
- * 评论回复（已验证的选择器 + 人类节奏）
- */
 export async function commentReply(videoUrl: string, text: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
   const page = await getPage();
   try {
     await page.goto(videoUrl);
-    await humanDelay(3000, 6000);  // 模拟浏览视频
+    await humanDelay(3000, 6000);
 
-    // 滚动到评论区
     await page.evaluate(`(() => {
       const list = document.querySelector('[data-e2e="comment-list"]');
       if (list) list.scrollIntoView({behavior: 'instant', block: 'start'});
     })()`);
     await humanDelay(2000, 4000);
 
-    // 点击第一条评论的"回复"按钮
     const clicked = await page.evaluate(`(() => {
       const replyBtns = document.querySelectorAll('.riDGlQZm');
       for (const btn of replyBtns) {
@@ -153,18 +110,15 @@ export async function commentReply(videoUrl: string, text: string): Promise<{ ok
     if (!clicked) return { ok: false, error: '未找到回复按钮' };
     await humanDelay(1000, 3000);
 
-    // 点击评论输入框（.public-DraftEditor-content）
     await page.click('.public-DraftEditor-content');
     await humanDelay(500, 1500);
 
-    // 逐字输入（模拟人类打字，触发真实键盘事件）
     for (const char of text) {
       await page.type('.public-DraftEditor-content', char, { delay: 0 });
       await humanDelay(100, 300);
     }
     await humanDelay(1000, 3000);
 
-    // 点击红色箭头发送按钮（.FbVIhLlK.Law8JZNu）
     const sent = await page.evaluate(`(() => {
       const btn = document.querySelector('.FbVIhLlK.Law8JZNu');
       if (btn) { btn.click(); return true; }
@@ -182,16 +136,12 @@ export async function commentReply(videoUrl: string, text: string): Promise<{ ok
   }
 }
 
-/**
- * 关注用户
- */
 export async function friendRequest(userSecUid: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
   const page = await getPage();
   try {
     await page.goto(`https://www.douyin.com/user/${userSecUid}`);
     await humanDelay(3000, 6000);
 
-    // 点击关注按钮
     const clicked = await page.evaluate(`(() => {
       const btns = document.querySelectorAll('button');
       for (const btn of btns) {
@@ -217,16 +167,12 @@ export async function friendRequest(userSecUid: string): Promise<{ ok: boolean; 
   }
 }
 
-/**
- * 私信（需要进用户主页）
- */
 export async function sendDirectMessage(userSecUid: string, text: string): Promise<{ ok: boolean; riskSignal?: RiskSignal; error?: string }> {
   const page = await getPage();
   try {
     await page.goto(`https://www.douyin.com/user/${userSecUid}`);
     await humanDelay(3000, 6000);
 
-    // 找私信按钮
     const clicked = await page.evaluate(`(() => {
       const btns = document.querySelectorAll('button, a');
       for (const btn of btns) {
@@ -240,7 +186,6 @@ export async function sendDirectMessage(userSecUid: string, text: string): Promi
     if (!clicked) return { ok: false, error: '未找到私信按钮' };
     await humanDelay(2000, 4000);
 
-    // 输入私信内容
     await page.evaluate(`(() => {
       const input = document.querySelector('[contenteditable="true"]') || document.querySelector('textarea');
       if (input) {
@@ -250,7 +195,6 @@ export async function sendDirectMessage(userSecUid: string, text: string): Promi
     })()`);
     await humanDelay(1000, 3000);
 
-    // 发送
     await page.evaluate(`(() => {
       const btn = document.querySelector('.FbVIhLlK.Law8JZNu') || document.querySelector('[class*="send"]');
       if (btn) btn.click();
@@ -265,10 +209,6 @@ export async function sendDirectMessage(userSecUid: string, text: string): Promi
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
-
-// ---------------------------------------------------------------------------
-// 主入口
-// ---------------------------------------------------------------------------
 
 export interface BrowserConfig {
   baseUrl?: string;

@@ -1,7 +1,3 @@
-/**
- * channels-writer 单元测试
- */
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

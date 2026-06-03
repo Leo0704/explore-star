@@ -1,9 +1,3 @@
-/**
- * analyzeBatch 接入 completeWithCache 测试
- *
- * Phase 2 #4:验证 analyzeBatch 用 LLM 时走 cache,重复输入不调 LLM
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { _clearMemoryCache } from '../../src/adapters/llm/_cache.js';
 import type { Comment, BusinessProfile } from '../../src/core/types.js';

@@ -1,6 +1,3 @@
-/**
- * cosine 相似度（用于检索结果排序）
- */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) return 0;
   let dot = 0;

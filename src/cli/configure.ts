@@ -1,10 +1,3 @@
-/**
- * CLI 子命令：configure
- *
- * 用法: npx explore-star configure --business <dir> --disable <feature>
- *       修改业务配置（如禁用自动关键词权重）
- */
-
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBusinessProfile } from '../core/business-profile.js';
@@ -41,7 +34,6 @@ export async function runConfigure(args: string[]): Promise<void> {
   const setKeyValue = extractFlag(args, '--set');
 
   if (!disableFeature && !enableFeature && !setKeyValue) {
-    // 显示当前配置
     const loaded = await loadBusinessProfile(businessDir);
     const profile = loaded.profile;
 
@@ -67,14 +59,12 @@ export async function runConfigure(args: string[]): Promise<void> {
     return;
   }
 
-  // 修改配置
   const profilePath = join(businessDir, 'profile.yaml');
   if (!existsSync(profilePath)) {
     console.error(`错误：profile.yaml 不存在 ${profilePath}`);
     process.exit(1);
   }
 
-  // 读取当前配置（用 parseDocument 保留注释 / 锚点 / 引号风格）
   let doc: import('yaml').Document.Parsed;
   try {
     const { parseDocument } = await import('yaml');
@@ -89,7 +79,6 @@ export async function runConfigure(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // 应用修改（setIn 会自动创建不存在的中间路径）
   if (disableFeature) {
     doc.setIn(['feedback_config', 'auto_apply', disableFeature], false);
     console.log(`✅ 已禁用 ${disableFeature}`);
@@ -115,7 +104,6 @@ export async function runConfigure(args: string[]): Promise<void> {
     console.log(`✅ 已设置 ${key}=${value}`);
   }
 
-  // 写回文件（doc.toString 保留原注释和格式）
   writeFileSync(profilePath, doc.toString(), 'utf-8');
   console.log(`\n✅ 已写入 ${profilePath}`);
 }

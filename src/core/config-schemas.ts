@@ -1,26 +1,6 @@
-/**
- * 启动时 zod schema 校验 —— loadBusinessProfile / loadSafetyConfig 入口用
- *
- * 设计：
- *   - 只校验 spec 要求的字段（YAGNI：channels/conversion 不在这里）
- *   - 严格校验（positive int / non-empty string / enum）—— 防止 "配错字段 → 静默默认值"
- *   - 顶层 .passthrough()：保留 SafetyConfig 接口以外的字段（如 hook_review / browser），
- *     这些字段用 `as any` 访问，不参与严格校验
- *
- * 注意：types.ts 是单一真相源；本文件只负责运行时校验，不导出 type。
- */
-
 import { z } from 'zod';
 
-// ============================================================================
-// 基础原子类型
-// ============================================================================
-
 const NonEmptyString = z.string().min(1, '不能为空');
-
-// ============================================================================
-// 1. SafetyConfig (config/safety.json)
-// ============================================================================
 
 const SafetyRateLimitsSchema = z.object({
   douyin: z.object({
@@ -49,10 +29,6 @@ export const safetyConfigSchema = z.object({
   emergency_stop: NonEmptyString,
   fatal_signals: z.array(NonEmptyString).min(1, '至少 1 个 fatal signal'),
 }).passthrough();
-
-// ============================================================================
-// 2. BusinessProfile (business/profile.yaml)
-// ============================================================================
 
 const LLMProviderSchema = z.enum(['openai', 'deepseek', 'anthropic', 'ollama', 'custom']);
 const CRMTypeSchema = z.enum(['feishu', 'notion', 'airtable', 'csv', 'custom']);
@@ -101,7 +77,6 @@ export const businessProfileSchema = z.object({
   buying_stages: z.array(BuyingStageSchema).optional(),
   llm: LLMConfigSchema,
   crm: CRMConfigSchema,
-  // P0-E 修复：以下字段让硬编码的 channel/embedding/notifier 名字可配置
   channel: z.object({
     name: NonEmptyString,
   }).passthrough().optional(),
@@ -138,20 +113,12 @@ export const businessProfileSchema = z.object({
   knowledge_dir: z.string().optional(),
 }).passthrough();
 
-// ============================================================================
-// 3. 错误格式化
-// ============================================================================
-
 export function formatZodError(prefix: string, error: z.ZodError): string {
   const issues = error.issues
     .map(i => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
     .join('\n');
   return `${prefix} 校验失败 (${error.issues.length} 个问题):\n${issues}`;
 }
-
-// ============================================================================
-// ChannelRateLimits (channels.yaml — channel_rate_limits 块，Phase 1 #2)
-// ============================================================================
 
 const ChannelRateLimitsDouyinSchema = z.object({
   search_qps: z.number().min(0),

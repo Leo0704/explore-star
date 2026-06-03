@@ -1,10 +1,3 @@
-/**
- * Prompt 模板加载器
- *
- * 从 business.example/燃点-FDE/prompts/ 目录加载 Handlebars 模板，
- * 支持 {{ business.name }} / {{#each target_personas}} 等变量注入。
- */
-
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Handlebars from 'handlebars';
@@ -16,9 +9,6 @@ export interface PromptTemplates {
   hookDm: string;
 }
 
-/**
- * 加载所有 prompt 模板
- */
 export async function loadPromptTemplates(promptsDir: string): Promise<PromptTemplates> {
   const [intentSystem, intentUser, hookReply, hookDm] = await Promise.all([
     readFile(join(promptsDir, 'intent-system.md'), 'utf-8'),
@@ -30,9 +20,6 @@ export async function loadPromptTemplates(promptsDir: string): Promise<PromptTem
   return { intentSystem, intentUser, hookReply, hookDm };
 }
 
-/**
- * 预编译 intent-system prompt（注入业务画像）
- */
 export function compileIntentSystemPrompt(
   template: string,
   ctx: {
@@ -53,9 +40,6 @@ export function compileIntentSystemPrompt(
   return Handlebars.compile(template)(ctx);
 }
 
-/**
- * 预编译 hook prompt
- */
 export function compileHookPrompt(
   template: string,
   ctx: {
