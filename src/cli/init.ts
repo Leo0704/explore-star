@@ -36,17 +36,20 @@ export async function runInit(args: string[]): Promise<void> {
     console.log(USAGE);
     console.error('\n错误：缺少 <name> 参数');
     process.exit(1);
+    return;
   }
 
   if (!existsSync(source)) {
     console.error(`错误：源目录不存在 ${source}`);
     process.exit(1);
+    return;
   }
 
   const dst = `./${name}`;
   if (existsSync(dst)) {
     console.error(`错误：目标目录已存在 ${dst}`);
     process.exit(1);
+    return;
   }
 
   console.log(`📋 初始化业务目录：${name}`);
