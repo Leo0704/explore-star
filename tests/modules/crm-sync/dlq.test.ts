@@ -74,6 +74,7 @@ class ScriptedCRM implements CRMAdapter {
   }
   async getLead(): Promise<Lead | null> { return null; }
   async updateStatus(): Promise<void> {}
+  async updateLeadFields(): Promise<void> {}
   async listLeads(): Promise<Lead[]> { return []; }
   async ping(): Promise<boolean> { return true; }
 }

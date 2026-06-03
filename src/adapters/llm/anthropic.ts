@@ -22,9 +22,15 @@ export class AnthropicLLM implements LLMProvider {
     embedPerMTok: 0,
   };
 
-  constructor(private readonly apiKey: string = process.env.ANTHROPIC_API_KEY ?? '') {
+  constructor(
+    private readonly apiKey: string = process.env.ANTHROPIC_API_KEY ?? '',
+    opts: { model?: string } = {},
+  ) {
     if (!this.apiKey) throw new Error('AnthropicLLM 需要 ANTHROPIC_API_KEY 环境变量');
+    this.model = opts.model ?? 'claude-3-5-sonnet-20241022';
   }
+
+  private readonly model: string;
 
   async complete(prompt: string, opts: LLMOptions = {}): Promise<string> {
     // 从 prompt 中提取 system prompt（约定：systemPrompt \n\n userPrompt \n\n ...)
@@ -42,7 +48,7 @@ export class AnthropicLLM implements LLMProvider {
     }
 
     const body: Record<string, unknown> = {
-      model: 'claude-3-5-sonnet-20241022',
+      model: this.model,
       max_tokens: opts.maxTokens ?? 1000,
       messages: [{ role: 'user', content: userContent }],
     };
@@ -79,8 +85,11 @@ export class AnthropicLLM implements LLMProvider {
   }
 
   async embed(_text: string): Promise<number[]> {
-    // Anthropic 目前没有 embedding 接口，降级到 0 向量
-    return Array(1536).fill(0);
+    // Anthropic 目前没有 embedding 接口。
+    // 不能返 0 向量（会让 RAG cosine 全 0）；必须 fail-loud 让调用方换 provider。
+    throw new Error(
+      'Anthropic does not provide an embedding API; use a dedicated embedding provider (OpenAI or Qwen) for RAG indexing.',
+    );
   }
 
   async ping(): Promise<{ ok: boolean; latency_ms: number }> {

@@ -45,9 +45,13 @@ export interface CacheOptions {
 
 const memoryCache = new Map<string, CacheEntry>();
 
-/** 测试 hook:清空内存 cache */
+/** 磁盘索引是否已加载（process 内一次性） */
+let diskIndexLoaded = false;
+
+/** 测试 hook:清空内存 cache 与磁盘索引标记 */
 export function _clearMemoryCache(): void {
   memoryCache.clear();
+  diskIndexLoaded = false;
 }
 
 /** 测试 hook:查看当前内存 cache 大小 */
@@ -90,28 +94,30 @@ export async function cacheGet(
   const mem = memoryCache.get(key);
   if (mem) return mem;
 
-  // 2. 磁盘 fallback(只读,启动时不预热)
+  // 2. 磁盘 fallback:首次访问时一次性加载全部到内存索引,后续 O(1) 查表
   if (opts.persist && opts.persistPath && existsSync(opts.persistPath)) {
-    try {
-      const raw = await readFile(opts.persistPath, 'utf-8');
-      const lines = raw.split('\n').filter(Boolean);
-      // 从后往前找(NDJSON 追加写,最新条目在尾部)
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const entry = JSON.parse(lines[i]) as CacheEntry;
-          if (entry.promptHash === key && entry.model === model) {
-            // 回填到内存
-            memoryCache.set(key, entry);
-            return entry;
+    if (!diskIndexLoaded) {
+      try {
+        const raw = await readFile(opts.persistPath, 'utf-8');
+        for (const line of raw.split('\n')) {
+          if (!line) continue;
+          try {
+            const entry = JSON.parse(line) as CacheEntry;
+            // 同 key 后写覆盖前写(NDJSON 追加语义,尾部为最新)
+            memoryCache.set(entry.promptHash, entry);
+          } catch {
+            // 跳过损坏行
+            continue;
           }
-        } catch {
-          // 跳过损坏行
-          continue;
         }
+        diskIndexLoaded = true;
+      } catch (e) {
+        log.warn({ err: e, path: opts.persistPath }, '读取 cache 失败,降级到无 cache');
       }
-    } catch (e) {
-      log.warn({ err: e, path: opts.persistPath }, '读取 cache 失败,降级到无 cache');
     }
+    // 命中内存索引(可能仍 miss —— 首次 cacheSet 才回填)
+    const hit = memoryCache.get(key);
+    if (hit && hit.model === model) return hit;
   }
 
   return null;

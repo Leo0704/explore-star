@@ -134,8 +134,8 @@ export async function handleWechatAdded(
     level: 'info',
   });
 
-  // 更新 lead 状态
-  await opts.crm.updateStatus(lead.cid, '已预约', '已推送加微后物料');
+  // 注意：物料推送 ≠ 客户预约。状态推进留给 booking-listener / 实际客户行为。
+  // 触达事件由下方 recordEvent('touchpoint_sent') 落盘，无需再改 lead.status。
 
   // Loop 5: 记录触达事件（供反馈分析器归因）
   void recordEvent({

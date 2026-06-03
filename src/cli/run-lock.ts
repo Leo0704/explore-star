@@ -16,13 +16,16 @@
  * 入口锁只需要「同机器不并发跑两次」这一条语义，PID 文件足够。
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, openSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { logger } from '../core/logger.js';
 
 const log = logger.child({ module: 'cli/run-lock' });
 
 export const LOCK_PATH = 'data/run.lock';
+
+/** 锁超过这个时长视为 stale（即便 PID 还活着 —— 防 PID 复用）。 */
+const STALE_LOCK_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 interface LockContent {
   pid: number;
@@ -69,21 +72,63 @@ export function isProcessAlive(pid: number): boolean {
 /**
  * 同步写锁。成功返回 true；发现活锁返回 false（不写文件）。
  * stale 锁会被覆盖（带警告）。
+ *
+ * 用 `openSync(LOCK_PATH, 'wx')` 做原子独占创建，避免 read-then-write 的 TOCTOU：
+ * 之前的「先读旧 PID、再写新 PID」两个进程同时跑会双双拿到锁。
  */
 export function acquireLock(): boolean {
-  const existing = readExistingLock();
-  if (existing) {
-    if (isProcessAlive(existing.pid)) {
-      log.error({ pid: existing.pid, startedAt: existing.startedAt }, '另一个 run 正在运行，拒绝启动');
-      return false;
-    }
-    log.warn({ pid: existing.pid }, '检测到 stale lock，覆盖之');
-  }
+  const now = new Date();
+  const content = `pid=${process.pid}\nstarted_at=${now.toISOString()}\n`;
 
   mkdirSync(dirname(LOCK_PATH), { recursive: true });
-  const content = `pid=${process.pid}\nstarted_at=${new Date().toISOString()}\n`;
+
+  // 1) 原子独占创建
+  let fd: number;
+  try {
+    fd = openSync(LOCK_PATH, 'wx');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    // 2) 文件已存在 → 看看是不是 stale
+    return handleExistingLock(content, now);
+  }
+  try {
+    writeFileSync(fd, content, 'utf-8');
+  } finally {
+    closeSync(fd);
+  }
+  return true;
+}
+
+function handleExistingLock(content: string, now: Date): boolean {
+  const existing = readExistingLock();
+  if (!isStaleLock(existing, now)) {
+    log.error(
+      { pid: existing?.pid, startedAt: existing?.startedAt },
+      '另一个 run 正在运行，拒绝启动',
+    );
+    return false;
+  }
+  if (existing) {
+    log.warn(
+      { pid: existing.pid, startedAt: existing.startedAt },
+      '检测到 stale lock（PID 已死或锁超过 24h），覆盖之',
+    );
+  } else {
+    log.warn('检测到无法解析的 lock 文件，覆盖之');
+  }
   writeFileSync(LOCK_PATH, content, 'utf-8');
   return true;
+}
+
+/**
+ * 锁是否已 stale：PID 死了 / 锁文件解析不出来 / 锁超过 24h（防 PID 复用）都算 stale。
+ */
+function isStaleLock(existing: LockContent | null, now: Date): boolean {
+  if (!existing) return true;
+  if (!isProcessAlive(existing.pid)) return true;
+  const startedAtMs = Date.parse(existing.startedAt);
+  if (Number.isNaN(startedAtMs)) return true;
+  return now.getTime() - startedAtMs > STALE_LOCK_THRESHOLD_MS;
 }
 
 /**

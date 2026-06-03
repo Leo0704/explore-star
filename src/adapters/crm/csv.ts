@@ -23,28 +23,34 @@ const COLUMNS: Array<keyof Lead> = [
   'execution_count', 'response_count',
   'wechat_added_at', 'booked_at', 'closed_at', 'revenue', 'last_interaction_at',
   'created_at', 'updated_at', 'notes',
+  'status_history', 'opt_out', 'hook_style', 'source_keyword',
+  'source_video_id', 'detected_at', 'custom_fields',
 ];
 
 export class CsvCRM implements CRMAdapter {
   constructor(private readonly csvPath: string = './data/leads.csv') {}
 
   async syncLeads(leads: Lead[]): Promise<SyncResult> {
-    const existing = await this.readAll();
-    const byCid = new Map(existing.map(l => [l.cid, l]));
-
-    let synced = 0;
     const errors: Array<{ cid: string; error: string }> = [];
+    let synced = 0;
+    try {
+      const existing = await this.readAll();
+      const byCid = new Map(existing.map(l => [l.cid, l]));
 
-    for (const lead of leads) {
-      try {
+      for (const lead of leads) {
         byCid.set(lead.cid, lead);
         synced++;
-      } catch (e) {
-        errors.push({ cid: lead.cid, error: String(e) });
       }
-    }
 
-    await this.writeAll([...byCid.values()]);
+      await this.writeAll([...byCid.values()]);
+    } catch (e) {
+      // IO failure: rollback the counted syncs and attribute the error to every lead in this batch.
+      const err = String(e);
+      for (const lead of leads) {
+        errors.push({ cid: lead.cid, error: err });
+      }
+      synced = 0;
+    }
     return { synced, failed: errors.length, errors };
   }
 
@@ -62,6 +68,15 @@ export class CsvCRM implements CRMAdapter {
     lead.status_history.push({
       from, to: status, at: new Date().toISOString(), note,
     });
+    lead.updated_at = new Date().toISOString();
+    await this.writeAll(all);
+  }
+
+  async updateLeadFields(cid: string, fields: Partial<Lead>): Promise<void> {
+    const all = await this.readAll();
+    const lead = all.find(l => l.cid === cid);
+    if (!lead) throw new Error(`Lead ${cid} not found`);
+    Object.assign(lead, fields);
     lead.updated_at = new Date().toISOString();
     await this.writeAll(all);
   }
@@ -117,7 +132,8 @@ export class CsvCRM implements CRMAdapter {
         const values = parseCsvLine(line);
         const obj: Record<string, unknown> = {};
         for (let i = 0; i < header.length; i++) {
-          obj[header[i]] = values[i];
+          // Unescape literal \n (two chars) back to a real newline (Bug 14).
+          obj[header[i]] = (values[i] ?? '').replace(/\\n/g, '\n');
         }
         return obj as unknown as Lead;
       });
@@ -130,7 +146,12 @@ export class CsvCRM implements CRMAdapter {
   private async writeAll(leads: Lead[]): Promise<void> {
     await mkdir(dirname(this.csvPath), { recursive: true });
     const header = COLUMNS.join(',');
-    const lines = leads.map(l => COLUMNS.map(c => csvField(String(l[c] ?? ''))).join(','));
+    const lines = leads.map(l => COLUMNS.map(c => {
+      const v = l[c];
+      if (v === undefined || v === null) return '';
+      if (c === 'custom_fields' || c === 'status_history') return csvField(JSON.stringify(v));
+      return csvField(String(v));
+    }).join(','));
     await writeFile(this.csvPath, [header, ...lines].join('\n'), 'utf-8');
   }
 }
@@ -144,7 +165,10 @@ function csvField(s: string): string {
   if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
     s = "'" + s;
   }
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+  // Bug 14: escape literal newlines to two chars (\n) so that readAll's
+  // pre-parse split on '\n' cannot break a single field across multiple lines.
+  s = s.replace(/\n/g, '\\n');
+  if (s.includes(',') || s.includes('"')) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;

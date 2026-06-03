@@ -24,6 +24,32 @@ describe('AnthropicLLM', () => {
     }));
   });
 
+  it('complete uses custom model from constructor opts', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    });
+
+    const llm = new AnthropicLLM('test-key', { model: 'claude-3-haiku-20240307' });
+    await llm.complete('hi');
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('claude-3-haiku-20240307');
+  });
+
+  it('complete defaults to claude-3-5-sonnet-20241022 when no model given', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    });
+
+    const llm = new AnthropicLLM('test-key');
+    await llm.complete('hi');
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe('claude-3-5-sonnet-20241022');
+  });
+
   it('complete error path', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
@@ -54,11 +80,9 @@ describe('AnthropicLLM', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('embed returns zero vector', async () => {
+  it('embed throws because Anthropic has no embedding API', async () => {
     const llm = new AnthropicLLM('test-key');
-    const vec = await llm.embed('hello');
-    expect(vec).toHaveLength(1536);
-    expect(vec.every(n => n === 0)).toBe(true);
+    await expect(llm.embed('hello')).rejects.toThrow(/embedding/i);
   });
 
   it('requires API key', () => {

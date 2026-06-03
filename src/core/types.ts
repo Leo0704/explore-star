@@ -326,6 +326,8 @@ export interface Task {
   // 浏览器执行所需（§3.6.5 browserExecute 依赖）
   video_url?: string;                   // 视频链接（like_and_follow / comment_reply 需要）
   user_sec_uid?: string;                // 用户 sec_uid（friend_request / dm 需要）
+  // §3.11 关键词归因（从 lead.source_keyword 透传）
+  source_keyword?: string;
 }
 
 // ============================================================================
@@ -470,6 +472,8 @@ export interface CRMAdapter {
   syncLeads(leads: Lead[]): Promise<SyncResult>;
   getLead(cid: string): Promise<Lead | null>;
   updateStatus(cid: string, status: LeadStatus, note?: string): Promise<void>;
+  /** 更新指定 lead 的若干字段（如 hook_style）。失败抛错。 */
+  updateLeadFields(cid: string, fields: Partial<Lead>): Promise<void>;
   listLeads(filter?: LeadFilter): Promise<Lead[]>;
   ping(): Promise<boolean>;
 }

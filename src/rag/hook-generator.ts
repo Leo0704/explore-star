@@ -7,6 +7,11 @@
  *   - 先尝试读取 data/feedback/weekly-insights.json，取最优 hook_style
  *   - 冷启动 fallback: profile.hook_config.style ?? '像朋友推荐，不像销售'
  *   - 必须写回 lead.hook_style
+ *
+ * Bug 32 修复：风格选择统一用 feedback-loader.selectBestHookStyle
+ *   （之前 hook-generator 内部有 selectBestStyle + 局部 loadLatestInsights，与
+ *    feedback-loader.selectBestHookStyle 重复且行为不一致 —— 后者返回 null 让
+ *    caller 决定 fallback，前者直接吃 defaultStyle）。两处共用同一函数。
  */
 
 import { readFile } from 'node:fs/promises';
@@ -14,9 +19,8 @@ import { join } from 'node:path';
 import type { BusinessProfile, Lead, EmbeddingProvider } from '../core/types.js';
 import { getLLM } from '../adapters/registry.js';
 import { compileHookPrompt } from '../modules/intent-analyzer/prompts-loader.js';
+import { selectBestHookStyle } from '../modules/nurture-engine/feedback-loader.js';
 import { retrieveTopK, type RetrievedDoc } from './retriever.js';
-
-const INSIGHTS_PATH = './data/feedback/weekly-insights.json';
 
 export interface HookGeneratorOptions {
   profile: BusinessProfile;
@@ -31,38 +35,8 @@ export interface GenerateHookResult {
   hook: string;
   hookStyle: string;
   usedDocs: RetrievedDoc[];
-}
-
-/**
- * 读取最新的 weekly-insights.json（反馈驱动风格选择）
- */
-async function loadLatestInsights(): Promise<{
-  hook_style_performance: Array<{ style: string; replied: number; tested: number; rate: number }>;
-} | null> {
-  try {
-    const raw = await readFile(INSIGHTS_PATH, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 从 insights 中取回复率最高的风格
- */
-function selectBestStyle(
-  insights: { hook_style_performance: Array<{ style: string; replied: number; tested: number; rate: number }> } | null,
-  defaultStyle: string,
-): string {
-  if (!insights?.hook_style_performance?.length) {
-    return defaultStyle;
-  }
-
-  const best = insights.hook_style_performance
-    .filter(s => s.tested >= 3) // 至少 3 次测试才采纳
-    .sort((a, b) => b.rate - a.rate)[0];
-
-  return best?.style ?? defaultStyle;
+  /** 返回的 lead 已带 hook_style 字段；调用方负责写回 CRM（不再就地改 input） */
+  lead: Lead;
 }
 
 /**
@@ -81,10 +55,10 @@ export async function generateHook(
 ): Promise<GenerateHookResult> {
   const topK = opts.topK ?? 3;
 
-  // 1. 读取 weekly insights，取最优风格
-  const insights = await loadLatestInsights();
-  const defaultStyle = profile.hook_config?.style ?? '像朋友推荐，不像销售';
-  const hookStyle = selectBestStyle(insights, defaultStyle);
+  // 1. 取最优风格（统一走 feedback-loader.selectBestHookStyle）
+  //    优先级：weekly-insights.json（≥3 次测试的最优风格） > profile.hook_config.style > 默认
+  const bestStyle = await selectBestHookStyle();
+  const hookStyle = bestStyle ?? profile.hook_config?.style ?? '像朋友推荐，不像销售';
 
   // 2. 知识库检索 top-K
   const query = `${lead.persona} ${lead.pain_point}`;
@@ -129,13 +103,13 @@ export async function generateHook(
   const llm = getLLM(profile.llm.provider);
   const maxLength = (profile.hook_config?.max_length ?? 30) * 2; // 2 倍截断
   const output = await llm.complete(prompt, { temperature: 0.7, maxTokens: 200 });
-  const hook = output.trim().slice(0, maxLength);
+  // Bug 62: 按 codepoint 截断,避免 .slice 在 UTF-8 代理对/组合字符中间切断
+  const hook = Array.from(output.trim()).slice(0, maxLength).join('');
 
-  // 6. 写回 lead.hook_style（核心：反馈归因需要知道本次使用的风格）
-  // 注意：这是内存操作，调用方负责写回 CRM
-  (lead as Lead & { hook_style?: string }).hook_style = hookStyle;
+  // 6. 返回带 hook_style 的 lead（不修改入参），调用方负责 crm.updateLeadFields 持久化
+  const updatedLead: Lead = { ...lead, hook_style: hookStyle };
 
-  return { hook, hookStyle, usedDocs };
+  return { hook, hookStyle, usedDocs, lead: updatedLead };
 }
 
 // ---------------------------------------------------------------------------

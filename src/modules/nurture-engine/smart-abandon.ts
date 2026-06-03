@@ -10,10 +10,21 @@ import type { Lead } from '../../core/types.js';
 // 拒绝信号词列表
 // ---------------------------------------------------------------------------
 
-const REJECT_SIGNALS = [
-  '不需要', '别发了', '别再发', '拉黑', '不要', '没兴趣', '不用了',
+// 4+ 字中文：子串匹配即可（误报风险低）
+const REJECT_SIGNALS_EXACT = [
+  '不需要',
+];
+
+// 短中文（≤3 字）+ 英文：必须 word-boundary 匹配
+// 避免 "stop" 子串误中 "unstoppable"，"不要" 误中相邻短语
+const REJECT_SIGNALS_BOUNDARY = [
+  '别发了', '别再发', '拉黑', '不要', '没兴趣', '不用了',
   'stop', 'unsubscribe',
 ];
+const REJECT_SIGNAL_BOUNDARY_REGEX = new RegExp(
+  `(?:^|\\b)(${REJECT_SIGNALS_BOUNDARY.join('|')})(?:$|\\b)`,
+  'i',
+);
 
 // ---------------------------------------------------------------------------
 // opt_out 检测
@@ -24,7 +35,8 @@ const REJECT_SIGNALS = [
  */
 export function checkOptOut(responseText: string | undefined | null): boolean {
   if (!responseText) return false;
-  return REJECT_SIGNALS.some(signal => responseText.includes(signal));
+  if (REJECT_SIGNALS_EXACT.some(signal => responseText.includes(signal))) return true;
+  return REJECT_SIGNAL_BOUNDARY_REGEX.test(responseText);
 }
 
 // ---------------------------------------------------------------------------

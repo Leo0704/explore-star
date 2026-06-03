@@ -6,6 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 import type { LeadEvent } from '../../src/core/types.js';
+import { computeHookStyleAttribution } from '../../src/modules/feedback-analyzer/hook-style-attribution.js';
+import { computePersonaValue } from '../../src/modules/feedback-analyzer/persona-value.js';
 
 function mkEvent(overrides: Partial<LeadEvent> = {}): LeadEvent {
   return {
@@ -86,5 +88,96 @@ describe('反馈分析器算法（spec 对照）', () => {
       expect(proposed(1, 4)).toBe(2.0);
       expect(proposed(1, 0.25)).toBe(0.5);
     });
+  });
+});
+
+describe('Bug 56: hook-style-attribution replied 必须按 cid 去重', () => {
+  it('同一 lead 经历 已互动→已加好友→已加微 只算 1 次 replied', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', hook_style: '朋友推荐', to_status: '已互动' }),
+      mkEvent({ cid: 'c1', hook_style: '朋友推荐', to_status: '已加好友' }),
+      mkEvent({ cid: 'c1', hook_style: '朋友推荐', to_status: '已加微' }),
+    ];
+    const { performance } = computeHookStyleAttribution(events);
+    const style = performance.find(p => p.style === '朋友推荐')!;
+    expect(style.tested).toBe(1);
+    expect(style.replied).toBe(1);
+    expect(style.rate).toBeLessThanOrEqual(1);
+    expect(style.rate).toBe(1);
+  });
+
+  it('不同 lead 各自回复 → 各自算 1 次', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', hook_style: '朋友推荐', to_status: '已互动' }),
+      mkEvent({ cid: 'c2', hook_style: '朋友推荐', to_status: '已加微' }),
+    ];
+    const { performance } = computeHookStyleAttribution(events);
+    const style = performance.find(p => p.style === '朋友推荐')!;
+    expect(style.tested).toBe(2);
+    expect(style.replied).toBe(2);
+    expect(style.rate).toBe(1);
+  });
+});
+
+describe('Bug 57: persona-value CONVERTED_STATUSES 只能含 已成交', () => {
+  it('已私信 不应算 converted', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', persona: 'self_media', to_status: '已私信' }),
+    ];
+    const { values } = computePersonaValue(events);
+    const v = values.find(x => x.persona === 'self_media')!;
+    expect(v.conversions).toBe(0);
+  });
+
+  it('已加微 不应算 converted', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', persona: 'self_media', to_status: '已加微' }),
+    ];
+    const { values } = computePersonaValue(events);
+    const v = values.find(x => x.persona === 'self_media')!;
+    expect(v.conversions).toBe(0);
+  });
+
+  it('已预约 不应算 converted', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', persona: 'self_media', to_status: '已预约' }),
+    ];
+    const { values } = computePersonaValue(events);
+    const v = values.find(x => x.persona === 'self_media')!;
+    expect(v.conversions).toBe(0);
+  });
+
+  it('已成交 算 converted', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', persona: 'self_media', to_status: '已成交', metadata: { revenue: 100 } }),
+    ];
+    const { values } = computePersonaValue(events);
+    const v = values.find(x => x.persona === 'self_media')!;
+    expect(v.conversions).toBe(1);
+    expect(v.revenue).toBe(100);
+  });
+});
+
+describe('Bug 58: persona-value revenue 必须是 number', () => {
+  it('metadata.revenue 为 string 时不应破坏 revenue 求和（不产生 NaN / 字符串拼接）', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', persona: 'self_media', to_status: '已成交', metadata: { revenue: 100 } }),
+      mkEvent({ cid: 'c2', persona: 'self_media', to_status: '已成交', metadata: { revenue: '50' as unknown as number } }),
+    ];
+    const { values } = computePersonaValue(events);
+    const v = values.find(x => x.persona === 'self_media')!;
+    // 第二个事件 string revenue 应当被丢弃（视作 0），不与第一个相加
+    expect(v.revenue).toBe(100);
+    expect(typeof v.revenue).toBe('number');
+    expect(Number.isFinite(v.revenue)).toBe(true);
+  });
+
+  it('metadata.revenue 为 string 且是唯一事件时 revenue 应为 0', () => {
+    const events: LeadEvent[] = [
+      mkEvent({ cid: 'c1', persona: 'self_media', to_status: '已成交', metadata: { revenue: '100' as unknown as number } }),
+    ];
+    const { values } = computePersonaValue(events);
+    const v = values.find(x => x.persona === 'self_media')!;
+    expect(v.revenue).toBe(0);
   });
 });

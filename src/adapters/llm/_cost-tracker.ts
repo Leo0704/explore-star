@@ -13,12 +13,14 @@
 import type { LLMProvider } from '../../core/types.js';
 
 /**
- * 估算 token 数:1 token ≈ 4 字符（中英文混合经验值，参考 OpenAI tiktoken）
- * 向上取整避免 0 token 漏算
+ * 估算 token 数:CJK 字符约 1.5 token/字,其他字符约 0.25 token/字(1 token ≈ 4 字符)。
+ * 向上取整避免 0 token 漏算。
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  return Math.ceil(text.length / 4);
+  const cjkCount = (text.match(/[一-鿿぀-ヿ]/g) || []).length;
+  const otherCount = text.length - cjkCount;
+  return Math.ceil(cjkCount * 1.5 + otherCount / 4);
 }
 
 export interface CostSnapshot {

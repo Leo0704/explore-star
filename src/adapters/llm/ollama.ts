@@ -35,8 +35,8 @@ export class OllamaLLM implements LLMProvider {
       stream: false,
     };
     if (opts.temperature !== undefined) body.temperature = opts.temperature;
-    if (opts.maxTokens) body.options = { num_predict: opts.maxTokens };
-    if (opts.stop) body.options = { ...(body.options as object), stop: opts.stop };
+    if (opts.maxTokens !== undefined) body.options = { num_predict: opts.maxTokens };
+    if (opts.stop !== undefined) body.options = { ...(body.options as object), stop: opts.stop };
 
     const res = await fetchWithRetry(`${this.baseUrl}/api/chat`, {
       method: 'POST',

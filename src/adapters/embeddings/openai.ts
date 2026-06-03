@@ -23,7 +23,7 @@ export class OpenAIEmbedding implements EmbeddingProvider {
     this.apiKey = opts.apiKey;
     this.baseUrl = opts.baseUrl || 'https://api.openai.com/v1';
     this.model = opts.model || 'text-embedding-3-small';
-    this.dimensions = this.model === 'text-embedding-3-small' ? 1536 : 1536;
+    this.dimensions = this.model === 'text-embedding-3-large' ? 3072 : 1536;
   }
 
   async embed(text: string): Promise<number[]> {

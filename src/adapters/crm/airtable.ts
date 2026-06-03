@@ -65,6 +65,21 @@ export class AirtableCRM implements CRMAdapter {
     await this.patchRecord(record.id, fields);
   }
 
+  async updateLeadFields(cid: string, fields: Partial<Lead>): Promise<void> {
+    const record = await this.findRecordByCid(cid);
+    if (!record) throw new Error(`Lead ${cid} not found`);
+
+    const patch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) continue;
+      const target = this.fieldMapping?.[k] ?? k;
+      patch[target] = typeof v === 'string' ? escapeFormula(v) : v;
+    }
+    patch[this.fieldMap('updated_at')] = new Date().toISOString();
+
+    await this.patchRecord(record.id, patch);
+  }
+
   async listLeads(filter?: LeadFilter): Promise<Lead[]> {
     const formula = this.buildFilter(filter);
     const records = await this.queryRecords(formula, 100);

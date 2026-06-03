@@ -41,8 +41,20 @@ export async function fetchWithRetry(
       if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
         if (attempt < maxRetries) {
           const retryAfterRaw = res.headers?.get?.('retry-after');
-          const retryAfter = Number(retryAfterRaw) || 0;
-          const delay = retryAfter > 0 ? retryAfter * 1000 : baseDelayMs * Math.pow(2, attempt);
+          let retryAfterMs = 0;
+          if (retryAfterRaw) {
+            if (/^[0-9]+$/.test(retryAfterRaw)) {
+              // delta-seconds
+              retryAfterMs = Number(retryAfterRaw) * 1000;
+            } else {
+              // HTTP-date
+              const dateMs = Date.parse(retryAfterRaw);
+              if (!Number.isNaN(dateMs)) {
+                retryAfterMs = Math.max(0, dateMs - Date.now());
+              }
+            }
+          }
+          const delay = retryAfterMs > 0 ? retryAfterMs : baseDelayMs * Math.pow(2, attempt);
           await sleep(delay);
           continue;
         }

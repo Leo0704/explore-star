@@ -29,9 +29,6 @@ export async function reactivateLead(
   lead: Lead,
   opts: ReactivateOptions,
 ): Promise<ReactivateResult> {
-  const maxAttempts = opts.conversion.reactivation?.max_attempts ?? 1;
-
-  // 检查是否超过最大尝试次数
   // V1.4: 暂不在 lead 上记录 attempts，通过 events.jsonl 判断
   // 如果 lead 有"已再激活"记录，跳过
 

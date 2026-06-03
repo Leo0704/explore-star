@@ -7,6 +7,8 @@
  * 替代 channels.yaml 里人手写的静态关键词。
  */
 
+import { readFile, writeFile } from 'node:fs/promises';
+import YAML from 'yaml';
 import type { BusinessProfile } from '../core/types.js';
 import { logger } from '../core/logger.js';
 
@@ -104,4 +106,66 @@ function parseKeywords(raw: string): string[] {
 
   return (parsed as unknown[])
     .filter((k): k is string => typeof k === 'string' && k.length > 0 && k.length <= 20);
+}
+
+/**
+ * 写回生成的关键词到 channels.yaml
+ *
+ * Bug 15：generateSearchKeywords 只返回内存 map，run-daily 合并后没有落盘，
+ * 下次 run 又要从零生成（重复烧 token + 失去连续性）。
+ * 用 parseDocument 保留注释（yaml.parse + yaml.stringify 会丢注释）。
+ *
+ * 失败 fail-loud 优先（参照 channels-writer 模式）：缺文件 / 不可写 → log warn + 返回 false，不抛。
+ */
+export async function writebackGeneratedKeywords(
+  channelsPath: string,
+  generated: KeywordMap,
+): Promise<{ written: number; skipped?: 'empty' | 'file_missing' | 'parse_failed' | 'write_failed' }> {
+  const entries = Object.entries(generated);
+  if (entries.length === 0) return { written: 0, skipped: 'empty' };
+
+  let raw: string;
+  try {
+    raw = await readFile(channelsPath, 'utf-8');
+  } catch {
+    log.warn({ channelsPath }, 'channels.yaml 不存在，跳过关键词写回');
+    return { written: 0, skipped: 'file_missing' };
+  }
+
+  let doc: ReturnType<typeof YAML.parseDocument>;
+  try {
+    doc = YAML.parseDocument(raw);
+  } catch (e) {
+    log.warn({ err: e, channelsPath }, 'channels.yaml 解析失败，跳过关键词写回');
+    return { written: 0, skipped: 'parse_failed' };
+  }
+
+  // 取/建 search 节点
+  let search = doc.get('search') as Record<string, unknown> | undefined;
+  if (!search || typeof search !== 'object') {
+    search = {};
+    doc.set('search', search);
+  }
+
+  // 取/建 search.keywords
+  let keywords = search.keywords as Record<string, { weight: number }> | undefined;
+  if (!keywords || typeof keywords !== 'object') {
+    keywords = {};
+  }
+
+  // 合并：generated 覆盖（更高优先级，因为是当前业务画像实时生成的）
+  for (const [kw, v] of entries) {
+    keywords[kw] = v;
+  }
+  search.keywords = keywords;
+  doc.set('search', search);
+
+  try {
+    await writeFile(channelsPath, doc.toString(), 'utf-8');
+  } catch (e) {
+    log.warn({ err: e, channelsPath }, 'channels.yaml 写回失败');
+    return { written: 0, skipped: 'write_failed' };
+  }
+  log.info({ count: entries.length, channelsPath }, '关键词已写回 channels.yaml');
+  return { written: entries.length };
 }

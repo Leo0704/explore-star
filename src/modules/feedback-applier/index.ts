@@ -14,7 +14,6 @@ import { join } from 'node:path';
 import { loadOutcomes, filterOutcomesForTraining } from './outcomes-loader.js';
 import { aggregateSignalsForPersona, applyMovingAverage } from './moving-average.js';
 import { updatePersonaValueScores, readOldPersonaScores } from './channels-writer.js';
-import { buildLearnedExamples, writeLearnedExamplesCache } from './learned-examples.js';
 import { logger } from '../../core/logger.js';
 
 export * from './outcomes-loader.js';
@@ -79,8 +78,10 @@ export async function applyOutcomeFeedback(
 
     const writeR = await updatePersonaValueScores({ channelsPath, updates: valueUpdates });
 
-    const learned = buildLearnedExamples(kept, kept.map(() => ''), kept.map(() => ''));
-    await writeLearnedExamplesCache({ cachePath: learnedCachePath, ...learned });
+    // V1.4: learned-examples 暂时跳过 — LeadOutcomeEvent schema 当前不含
+    // comment_snippet / pain_point 字段，传空数组会污染 cache。等 schema
+    // 扩展或从其他源（CRM 备注、聊天记录）补齐数据后再接入。
+    // 保留 learnedCachePath 参数以便后续重新启用。
 
     return {
       outcomes_loaded: outcomes.length,

@@ -85,7 +85,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.opts.apiKey}`,
       },
-      body: JSON.stringify({ model: 'text-embedding-3-small', input: text }),
+      body: JSON.stringify({ model: this.opts.model, input: text }),
     });
     if (!res.ok) throw new Error(`Embed API ${res.status}`);
     const json = await res.json() as { data: Array<{ embedding: number[] }> };

@@ -10,7 +10,8 @@
  *        OR 历史有过 run 但最近 7 天无（"停跑"信号）
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { extractFlag, showUsage, selfInvoke } from './_shared.js';
 import { readRunHistory, summaryStats, type RunHistoryEntry } from '../orchestration/run-history.js';
 import { logger } from '../core/logger.js';
@@ -29,7 +30,9 @@ const USAGE = `
   --json              输出结构化 JSON
 `.trim();
 
-const HISTORY_PATH = './data/run_history.jsonl';
+function resolveHistoryPath(businessDir: string): string {
+  return join(businessDir, 'data', 'run_history.jsonl');
+}
 
 export interface StatusOptions {
   business: string;
@@ -91,15 +94,6 @@ export function decideExitCode(entries: RunHistoryEntry[], neverRunBefore: boole
   return lastEntry.exit_reason === 'completed' ? 0 : 1;
 }
 
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    readFileSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function runStatus(args: string[]): Promise<void> {
   if (showUsage(USAGE, args)) return;
 
@@ -113,9 +107,13 @@ export async function runStatus(args: string[]): Promise<void> {
   const days = daysRaw ? Math.max(1, parseInt(daysRaw, 10)) : 7;
   const jsonMode = args.includes('--json');
 
+  // history 路径从 businessDir 派生
+  const historyPath = resolveHistoryPath(business);
+
   // neverRunBefore 判定：history 文件不存在
-  const neverRunBefore = !(await fileExists(HISTORY_PATH));
-  const entries = neverRunBefore ? [] : await readRunHistory(HISTORY_PATH, { sinceDays: days });
+  // 修复：原 fileExists 走 readFileSync，权限/IO 抖动会误判；改用 existsSync
+  const neverRunBefore = !existsSync(historyPath);
+  const entries = neverRunBefore ? [] : await readRunHistory(historyPath, { sinceDays: days });
 
   const opts: StatusOptions = { business, days, entries };
 

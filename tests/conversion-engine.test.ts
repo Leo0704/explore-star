@@ -96,7 +96,55 @@ describe('ConversionEngine', () => {
       });
 
       expect(result.pushed).toBe(true);
-      expect(mockCRM.updateStatus).toHaveBeenCalled();
+    });
+
+    // Bug 4 (P0): 物料推送 ≠ 预约。推送物料后不应把状态改为 '已预约'
+    it('should NOT change status to 已预约 after pushing material', async () => {
+      const { pushMaterial } = await import('../src/modules/conversion-engine/material-pusher.js');
+      const now = new Date();
+      const lead = createTestLead({
+        wechat_added_at: new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString(),
+        status: '已加微',
+      });
+
+      const result = await pushMaterial(lead, {
+        profile: mockProfile,
+        conversion: mockConversion,
+        crm: mockCRM,
+        postAddDelayHours: 24,
+      });
+
+      expect(result.pushed).toBe(true);
+      const calls = (mockCRM.updateStatus as any).mock.calls;
+      const bookedCalls = calls.filter((args: unknown[]) => args[1] === '已预约');
+      expect(bookedCalls).toHaveLength(0);
+    });
+  });
+
+  // Bug 4 (P0)：handleWechatAdded 同样不应把状态改为 '已预约'
+  describe('handleWechatAdded', () => {
+    it('should NOT change status to 已预约 after pushing material', async () => {
+      const { registerNotifier } = await import('../src/adapters/registry.js');
+      registerNotifier('wechat', { send: vi.fn().mockResolvedValue(undefined) } as any);
+
+      const { handleWechatAdded } = await import('../src/modules/conversion-engine/index.js');
+      const now = new Date();
+      const lead = createTestLead({
+        wechat_added_at: new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString(),
+        status: '已加微',
+      });
+
+      const result = await handleWechatAdded(lead, {
+        profile: mockProfile,
+        conversion: mockConversion,
+        crm: mockCRM,
+        postAddDelayHours: 24,
+      });
+
+      expect(result.pushed).toBe(true);
+      const calls = (mockCRM.updateStatus as any).mock.calls;
+      const bookedCalls = calls.filter((args: unknown[]) => args[1] === '已预约');
+      expect(bookedCalls).toHaveLength(0);
     });
   });
 

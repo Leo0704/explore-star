@@ -26,14 +26,14 @@ export interface HookStyleAttributionResult {
  * 计算各钩子风格的回复率 / 成交率
  */
 export function computeHookStyleAttribution(events: LeadEvent[]): HookStyleAttributionResult {
-  const byStyle: Record<string, { tested: Set<string>; replied: number; converted: number }> = {};
+  const byStyle: Record<string, { tested: Set<string>; replied: Set<string>; converted: number }> = {};
 
   for (const e of events) {
     if (!e.hook_style) continue;
-    if (!byStyle[e.hook_style]) byStyle[e.hook_style] = { tested: new Set(), replied: 0, converted: 0 };
+    if (!byStyle[e.hook_style]) byStyle[e.hook_style] = { tested: new Set(), replied: new Set(), converted: 0 };
     byStyle[e.hook_style].tested.add(e.cid);
     if (e.to_status && REPLIED_STATUSES.has(e.to_status as string)) {
-      byStyle[e.hook_style].replied++;
+      byStyle[e.hook_style].replied.add(e.cid);
     }
     if (e.to_status && CONVERTED_STATUSES.has(e.to_status as string)) {
       byStyle[e.hook_style].converted++;
@@ -43,8 +43,8 @@ export function computeHookStyleAttribution(events: LeadEvent[]): HookStyleAttri
   const performance: HookStylePerformance[] = Object.entries(byStyle).map(([style, s]) => ({
     style,
     tested: s.tested.size,
-    replied: s.replied,
-    rate: s.tested.size > 0 ? s.replied / s.tested.size : 0,
+    replied: s.replied.size,
+    rate: s.tested.size > 0 ? s.replied.size / s.tested.size : 0,
   }));
 
   // 取回复率最高的风格

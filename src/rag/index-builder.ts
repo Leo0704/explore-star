@@ -61,14 +61,25 @@ export async function buildKnowledgeIndex(
     // 启用 sqlite-vec 扩展（用包 helper 解析平台对应的 .dylib 绝对路径）
     loadSqliteVec(db);
 
+    // Bug 22：维度跟着 embeddingProvider.dimensions 走（OpenAI 1536 / 通义 1024 / bge 768 ...）
+    // 若旧表维度不一致，drop 后重建（vec0 改列维度只能 drop table）
+    const dim = embeddingProvider.dimensions;
+    const rows = db.prepare(
+      `SELECT type FROM pragma_table_info('knowledge_vectors') WHERE name = 'embedding'`,
+    ).all() as Array<{ type: string }>;
+    const existingType = rows[0]?.type ?? '';
+    const m = existingType.match(/^float\[(\d+)\]$/);
+    const existingDim = m ? parseInt(m[1], 10) : null;
+    if (existingDim !== null && existingDim !== dim) {
+      db.exec('DROP TABLE knowledge_vectors;');
+    }
+
     // 创建 virtual table
-    // Q1 切换：维度 1536（OpenAI）→ 1024（通义 v3 默认）
-    // 跟 src/adapters/embeddings/qwen.ts 的 dimensions 字段保持一致
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vectors USING vec0(
         path TEXT PRIMARY KEY,
         content TEXT,
-        embedding float[1024]
+        embedding float[${dim}]
       );
     `);
 

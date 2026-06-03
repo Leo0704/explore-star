@@ -25,7 +25,6 @@ export async function findDormantLeads(
 
   for (const lead of all) {
     if (!['已加微', '已私信'].includes(lead.status)) continue;
-    if (lead.status === '已成交' || lead.status === '已流失' || lead.status === '已再激活') continue;
 
     // 最后互动时间
     const lastInteraction = lead.last_interaction_at

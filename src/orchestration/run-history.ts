@@ -4,13 +4,12 @@
  * V1.4 + Phase 0：append-only JSONL，每行一条 RunHistoryEntry
  *
  * 设计：
- *   - 原子写：写 tmp 文件后 rename 替换整个文件（不是 append）
- *     原因：JSONL append 在断电时可能损坏末尾行；rename 是 POSIX 原子操作
- *   - 文件 < 1MB 时 O(N) 重写可接受；Phase 0 不优化
+ *   - 单行追加走 appendFile，写入 < PIPE_BUF (POSIX 4KB) 时是原子操作，
+ *     单条 RunHistoryEntry 远小于 4KB，避免 O(N) read+write+rename。
  *   - 坏行：readRunHistory 跳过（log warn），不阻塞后续
  */
 
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { logger } from '../core/logger.js';
@@ -48,26 +47,10 @@ export async function appendRunHistory(
 ): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
 
-  // 读现有内容（如果存在）
-  let existing = '';
-  if (existsSync(filePath)) {
-    try {
-      existing = await readFile(filePath, 'utf-8');
-    } catch {
-      existing = '';  // 读失败 → 当作空文件处理
-    }
-  }
-
-  // 拼接新行（确保以 \n 分隔）
-  const newLine = JSON.stringify(entry);
-  const newContent = existing.length === 0 || existing.endsWith('\n')
-    ? existing + newLine + '\n'
-    : existing + '\n' + newLine + '\n';
-
-  // 原子写
-  const tmp = `${filePath}.tmp.${process.pid}`;
-  await writeFile(tmp, newContent, 'utf-8');
-  await rename(tmp, filePath);
+  // 追加单行 NDJSON：单条 entry 序列化后远小于 PIPE_BUF (4KB POSIX)，
+  // appendFile 在此范围内是原子追加，O(1)。
+  const line = JSON.stringify(entry) + '\n';
+  await appendFile(filePath, line, 'utf-8');
 }
 
 export interface ReadRunHistoryOptions {

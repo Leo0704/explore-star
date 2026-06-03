@@ -13,14 +13,15 @@
  *   - Bearer xxx                       → <REDACTED>
  *   - sk-xxxxxxxx (OpenAI/Anthropic)   → <REDACTED>
  *   - patxxx (Airtable PAT)            → <REDACTED>
- *   - 通用 32+ 位 token                → <REDACTED>
+ *
+ * 注：早期版本里有一条「通用 32+ 位 token」规则，会把 UUID / commit hash /
+ * 纯十六进制串误判为 secret 然后脱敏，丢掉诊断信息。已移除，**只**匹配已知前缀。
  */
 
 const KEY_PATTERNS: RegExp[] = [
   /Bearer\s+[A-Za-z0-9._\-]+/gi,
   /sk-[A-Za-z0-9]{20,}/g,
   /pat[A-Za-z0-9.]{20,}/gi,
-  /\b[A-Za-z0-9_\-]{32,}\b/g,
 ];
 
 const REDACTED = '<REDACTED>';

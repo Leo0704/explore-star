@@ -143,8 +143,10 @@ describe('generateHook 钩子生成', () => {
       complete: mockLLM,
     } as any);
 
-    await generateHook(mockProfile, lead, 'reply', opts);
-    expect((lead as any).hook_style).toBeTruthy();
+    const result = await generateHook(mockProfile, lead, 'reply', opts);
+    // Bug 54: 不再就地修改 lead,通过返回值的 lead 字段承载 hook_style
+    expect(result.lead.hook_style).toBeTruthy();
+    expect((lead as any).hook_style).toBeUndefined();
   });
 
   it('weekly-insights.json 存在时使用最优风格（tested >= 3 + 最高 rate）', async () => {
@@ -183,8 +185,8 @@ describe('generateHook 钩子生成', () => {
 
     // 最高 rate 是 "数据驱动" (0.8)，且全部 tested >= 3
     expect(result.hookStyle).toBe('数据驱动');
-    // 同时应写回 lead.hook_style
-    expect((lead as any).hook_style).toBe('数据驱动');
+    // Bug 54: 通过返回值的 lead 字段承载 hook_style,不再修改入参
+    expect(result.lead.hook_style).toBe('数据驱动');
 
     vi.doUnmock('node:fs/promises');
     vi.resetModules();

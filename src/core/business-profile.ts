@@ -60,8 +60,7 @@ export async function loadBusinessProfile(businessDir: string): Promise<LoadedBu
 
   const result = businessProfileSchema.safeParse(profileRaw);
   if (!result.success) {
-    console.error(formatZodError(profilePath, result.error));
-    process.exit(1);
+    throw new Error(`profile.yaml validation failed: ${formatZodError(profilePath, result.error)}`);
   }
   const profile = result.data as BusinessProfile;
 

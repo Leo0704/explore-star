@@ -39,6 +39,7 @@ export interface FeedbackAnalyzerOptions {
   eventsPath?: string;       // 默认 ./data/feedback/events.jsonl
   insightsPath?: string;    // 默认 ./data/feedback/weekly-insights.json
   channelsPath?: string;     // 默认 business/channels.yaml
+  weeks?: number;            // 参考过去几周数据（默认 4）
 }
 
 export async function runWeeklyAnalysis(
@@ -138,7 +139,15 @@ function computeStats(events: LeadEvent[]): SystemStats {
 async function loadEvents(path: string): Promise<LeadEvent[]> {
   try {
     const raw = await readFile(path, 'utf-8');
-    return raw.split('\n').filter(Boolean).map(line => JSON.parse(line) as LeadEvent);
+    const out: LeadEvent[] = [];
+    for (const line of raw.split('\n').filter(Boolean)) {
+      try {
+        out.push(JSON.parse(line) as LeadEvent);
+      } catch (err) {
+        log.warn({ err, line }, 'events.jsonl 跳过无法解析的行');
+      }
+    }
+    return out;
   } catch {
     return [];
   }
@@ -156,7 +165,17 @@ async function applyKeywordWeights(
   try {
     const yaml = await import('yaml');
     const raw = await readFile(path, 'utf-8');
-    const config = yaml.parse(raw);
+    // 用 parseDocument 保留注释（yaml.parse + yaml.stringify 会丢注释）
+    const doc = yaml.parseDocument(raw);
+    const config = doc.toJSON() as {
+      search?: {
+        keywords?: Record<string, { weight?: number }>;
+        weight_min?: number;
+        weight_max?: number;
+        weight_cooldown_weeks?: number;
+        weight_meta?: Record<string, { last_adjusted_week?: string; consecutive_direction?: number }>;
+      };
+    } | null;
 
     if (!config?.search?.keywords) return;
 
@@ -166,10 +185,7 @@ async function applyKeywordWeights(
 
     // weight_meta 记录每个关键词的调整历史（写在 channels.yaml 里）
     if (!config.search.weight_meta) config.search.weight_meta = {};
-    const meta = config.search.weight_meta as Record<string, {
-      last_adjusted_week?: string;
-      consecutive_direction?: number; // 正=上调，负=下调
-    }>;
+    const meta = config.search.weight_meta;
 
     const currentWeek = getWeekStart();
     let changed = false;
@@ -205,7 +221,9 @@ async function applyKeywordWeights(
     }
 
     if (changed) {
-      await writeFile(path, yaml.stringify(config), 'utf-8');
+      // 把内存中已修改的 config 写回 doc，再用 doc.toString() 输出，保留注释
+      doc.set('search', config.search);
+      await writeFile(path, doc.toString(), 'utf-8');
       log.info('回路 1：已更新 channels.yaml 关键词权重');
     }
   } catch {

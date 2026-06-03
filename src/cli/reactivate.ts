@@ -40,7 +40,7 @@ export async function runReactivate(args: string[]): Promise<void> {
   const { profile, conversion } = loaded;
 
   // CRM
-  const crm = getCRM('csv');
+  const crm = getCRM(loaded.profile.crm.type);
 
   if (cid) {
     // 单个再激活

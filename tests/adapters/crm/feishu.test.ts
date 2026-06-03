@@ -35,14 +35,18 @@ describe('FeishuCRM', () => {
   });
 
   it('updateStatus throws on HTTP 500', async () => {
-    // First call: token fetch (succeeds), Second call: updateStatus fetch (500)
+    // Token → search (ok) → PUT /records/{id} (500)
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ tenant_access_token: 'tok', expire: 3600 }),
     });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { items: [{ record_id: 'rec1' }] } }),
+    });
     fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'Internal Error' });
     const crm = new FeishuCRM({ tableId: 'tbl1', appIdEnv: 'FEISHU_APP_ID', appSecretEnv: 'FEISHU_APP_SECRET', fieldMapping: { status: '状态' } });
-    await expect(crm.updateStatus('cid1', '已联系')).rejects.toThrow('飞书 API 500');
+    await expect(crm.updateStatus('cid1', '已联系')).rejects.toThrow('飞书更新失败 500');
   });
 
   it('upsertLead calls PATCH when record exists', async () => {

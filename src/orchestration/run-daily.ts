@@ -14,9 +14,10 @@
  */
 
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { loadBusinessProfile } from '../core/business-profile.js';
-import { registerBuiltins, getChannel, getNotifier } from '../adapters/registry.js';
+import { registerBuiltins, getChannel, getNotifier, setChannelConfigPath } from '../adapters/registry.js';
 import type { Comment, Lead, Notifier, BusinessProfile, Task } from '../core/types.js';
 import { executeTasks, loadSafetyConfig, type ExecutionResult, type SafetyConfig } from '../modules/task-executor/index.js';
 import { loadState, updateStep, markComplete, resetForNewDay } from './state.js';
@@ -232,6 +233,8 @@ async function runDailyBody(
     channels = loaded.channels;
     conversion = loaded.conversion;
     knowledgeDir = loaded.knowledgeDir;
+    // Bug 20：把 channel 限流配置路径从 CWD 相对改成业务目录绝对路径
+    setChannelConfigPath(join(opts.businessDir, 'channels.yaml'));
     await updateStep(0, 'completed', { mode: channels.source?.mode ?? 'sec_uid' });
 
     // 2. 注册所有内置 adapter
@@ -249,7 +252,7 @@ async function runDailyBody(
       const llmForKw = opts.injectLLM
         ? opts.injectLLM
         : (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
-      const { generateSearchKeywords } = await import('../modules/keyword-generator.js');
+      const { generateSearchKeywords, writebackGeneratedKeywords } = await import('../modules/keyword-generator.js');
       const generated = await generateSearchKeywords(profile, llmForKw);
       if (Object.keys(generated).length > 0) {
         channels.search = {
@@ -257,6 +260,8 @@ async function runDailyBody(
           keywords: { ...channels.search?.keywords, ...generated },
         };
         log.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
+        // Bug 15：落盘 channels.yaml，避免下次 run 重复生成
+        await writebackGeneratedKeywords(join(opts.businessDir, 'channels.yaml'), generated);
       }
     }
 
@@ -358,6 +363,8 @@ async function runDailyBody(
       const { generateHook } = await import('../rag/hook-generator.js');
 
       let ragSuccess = 0;
+      // Bug 54: dry-run 跳过 CRM 写回
+      const ragCrm = opts.dryRun ? null : await createCRM(profile).catch(() => null);
       for (const lead of leads) {
         try {
           const ragOpts = {
@@ -373,7 +380,15 @@ async function runDailyBody(
           // dm 钩子（私信用）
           const dmResult = await generateHook(profile, lead, 'dm', ragOpts);
           lead.suggested_dm_hook = dmResult.hook;
+          // Bug 54: 用返回的 lead（带 hook_style），并通过 crm.updateLeadFields 写回
           lead.hook_style = replyResult.hookStyle;
+          if (ragCrm) {
+            try {
+              await ragCrm.updateLeadFields(lead.cid, { hook_style: replyResult.hookStyle });
+            } catch (e) {
+              log.warn({ cid: lead.cid, err: String(e) }, 'hook_style 写回 CRM 失败');
+            }
+          }
           ragSuccess++;
         } catch {
           // 单个 lead RAG 失败不影响其他，保留 intent analyzer 的钩子
@@ -453,10 +468,13 @@ async function runDailyBody(
   // -------------------------------------------------------------------------
   // Step 5: execution（7b 任务执行 + 7c 转化引擎）
   // Phase 0 PR 1：统一在 step 末尾记 stepDurations
+  // Bug 18 修复：execution 块开始/结束必须 updateStep(4, ...)，否则 state.json 永远 pending
   // -------------------------------------------------------------------------
+  await updateStep(4, 'running');
   let tasksExecuted = 0;
   let executionResults: ExecutionResult[] = [];
   const stepStart_exec = Date.now();
+  let executionHadError = false;
   if (!opts.dryRun && tasks.length > 0 && opts.mode !== 'read-only') {
     try {
       const safety: SafetyConfig = loadSafetyConfig();
@@ -466,6 +484,7 @@ async function runDailyBody(
       tasksExecuted = executionResults.length;
       log.info({ executed: tasksExecuted, total: tasksCount }, '任务执行');
     } catch (e) {
+      executionHadError = true;
       errors.push(`任务执行失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -495,10 +514,21 @@ async function runDailyBody(
         new_deals_closed: report.new_deals_closed,
       }, '转化日报');
     } catch (e) {
+      executionHadError = true;
       errors.push(`转化引擎失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
   stepDurations['execution'] = Date.now() - stepStart_exec;
+
+  // Bug 18 修复：必须收尾 updateStep，否则 state.json 永远 pending
+  if (executionHadError) {
+    await updateStep(4, 'failed', { executed: tasksExecuted }, errors[errors.length - 1] ?? 'execution failed');
+  } else if (!opts.dryRun && tasks.length > 0 && opts.mode !== 'read-only') {
+    await updateStep(4, 'completed', { executed: tasksExecuted });
+  } else {
+    // 跳过实际执行（dryRun / read-only / 无任务）也必须标 completed
+    await updateStep(4, 'completed', { executed: 0, skipped: true });
+  }
 
   // -------------------------------------------------------------------------
   // Step 6: notification

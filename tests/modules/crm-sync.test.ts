@@ -70,6 +70,7 @@ class MockCRM implements CRMAdapter {
 
   async getLead(cid: string): Promise<Lead | null> { return null; }
   async updateStatus(cid: string, status: any, note?: string): Promise<void> {}
+  async updateLeadFields(cid: string, fields: any): Promise<void> {}
   async listLeads(filter?: any): Promise<Lead[]> { return []; }
   async ping(): Promise<boolean> { return true; }
 }

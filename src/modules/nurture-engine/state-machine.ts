@@ -103,6 +103,8 @@ export function buildTask(
     persona: lead.persona,
     scheduled_at: '',  // 由 generateDailyTasks 填充
     reason: `状态 ${lead.status} → ${transition.new_state}`,
+    // §3.11 关键词归因：透传 lead 的 source_keyword（fallback 到 keyword）
+    source_keyword: lead.source_keyword ?? lead.keyword,
   };
 }
 

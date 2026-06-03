@@ -9,8 +9,8 @@
 
 import type { LeadEvent, PersonaValue } from '../../core/types.js';
 
-// 转换状态集合
-const CONVERTED_STATUSES = new Set(['已成交', '已加微', '已预约', '已私信']);
+// 转换状态集合：仅 已成交 算「转化」，中间状态（已私信/已加微/已预约）不计入。
+const CONVERTED_STATUSES = new Set(['已成交']);
 
 export interface PersonaValueResult {
   values: PersonaValue[];
@@ -29,8 +29,9 @@ export function computePersonaValue(events: LeadEvent[]): PersonaValueResult {
     byPersona[e.persona].leads.add(e.cid);
     if (e.to_status && CONVERTED_STATUSES.has(e.to_status as string)) {
       byPersona[e.persona].conversions++;
-      // 从事件 metadata 读实际营收，无则为 0
-      const rev = (e.metadata?.revenue as number) ?? 0;
+      // 从事件 metadata 读实际营收，必须是 number，否则视作 0（避免字符串拼接）
+      const rawRev = e.metadata?.revenue;
+      const rev = typeof rawRev === 'number' ? rawRev : 0;
       byPersona[e.persona].revenue += rev;
     }
   }

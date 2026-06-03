@@ -6,7 +6,7 @@
  * V1 实现：通过 BrowserBridge 连接登录态浏览器执行真实操作
  */
 
-import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync, unlinkSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Task, TaskAction, TaskResult, Lead, CRMAdapter, LeadStatus } from '../../core/types.js';
 import { recordTaskExecuted } from '../feedback-analyzer/event-recorder.js';
@@ -14,6 +14,8 @@ import { safetyConfigSchema, formatZodError } from '../../core/config-schemas.js
 import { logger } from '../../core/logger.js';
 
 const log = logger.child({ module: 'task-executor' });
+
+const RISK_SIGNALS_LOG = './logs/risk-signals.jsonl';
 
 // ---------------------------------------------------------------------------
 // SafetyConfig（从 config/safety.json 读取）
@@ -341,7 +343,7 @@ export async function executeTasks(
 
     // F3: 接入事件记录器（fire-and-forget，错误吞掉避免影响主流程）
     void recordTaskExecuted(taskToExecute.lead_cid, {
-      keyword: '',
+      keyword: taskToExecute.source_keyword ?? '',
       hook_style: taskToExecute.hook_style,
       hook_text: taskToExecute.hook,
       persona: taskToExecute.persona,
@@ -363,6 +365,15 @@ export async function executeTasks(
 
     // 9. 风控信号检测
     if (result.risk_signal) {
+      // 持久化到 JSONL，供 safety-monitor 累计检测
+      try {
+        const dir = './logs';
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        appendFileSync(RISK_SIGNALS_LOG, JSON.stringify({ type: result.risk_signal.type, ts: Date.now() }) + '\n');
+      } catch (e) {
+        log.warn({ err: e }, '写入风控信号日志失败');
+      }
+
       if (result.risk_signal.action === 'emergency_stop') {
         throw new Error(`风控信号触发：${result.risk_signal.type}，紧急停止`);
       }
@@ -395,6 +406,8 @@ const ACTION_TO_NEW_STATE: Partial<Record<TaskAction, LeadStatus>> = {
 function nextStateForAction(action: TaskAction, currentState: LeadStatus): LeadStatus | null {
   const candidate = ACTION_TO_NEW_STATE[action];
   if (!candidate) return null;
+  // 已流失是终态，order 数组里没它会误判 indexOf=-1，不显式拦截会把流失 lead 推回去
+  if (currentState === '已流失') return null;
   // 若已有状态比 candidate 更靠后（如 "已加微"），不倒推
   const order: LeadStatus[] = ['新发现', '已关注', '已互动', '已加好友', '已私信', '已加微', '已预约', '已成交'];
   const currentIdx = order.indexOf(currentState);

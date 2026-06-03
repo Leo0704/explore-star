@@ -8,7 +8,7 @@
 
 import type { LeadEvent, BestInteractionTimes } from '../../core/types.js';
 
-const RESPONSIVE_STATUSES = new Set(['已互动', '已加好友', '已加微', '已预约', '已成交', '已私信']);
+const RESPONSIVE_STATUSES = new Set(['已互动', '已加好友', '已加微', '已预约', '已私信']);
 const MIN_SAMPLES = 3;
 
 export interface InteractionTimeResult {
@@ -26,8 +26,10 @@ export function computeInteractionTime(events: LeadEvent[]): InteractionTimeResu
     if (!byPersona[e.persona]) byPersona[e.persona] = new Map();
 
     const date = new Date(e.interaction_time);
-    const weekday = date.getDay();
-    const hour = date.getHours();
+    if (isNaN(date.getTime())) continue; // 跳过无效时间（会产生 "NaN-NaN" 桶）
+    // 用 UTC 而非 server local，避免时区漂移影响"最佳时段"判断
+    const weekday = date.getUTCDay();
+    const hour = date.getUTCHours();
     const key = `${weekday}-${hour}`;
 
     if (!byPersona[e.persona].has(key)) byPersona[e.persona].set(key, { total: 0, responses: 0 });

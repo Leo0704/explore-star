@@ -32,7 +32,7 @@ export async function runConvert(args: string[]): Promise<void> {
     console.error('\n错误：convert 需要 --business <dir>');
     process.exit(1);
   }
-  const date = extractFlag(args, '--date') || new Date().toISOString().slice(0, 10);
+  const date = extractFlag(args, '--date') || new Date().toLocaleDateString('en-CA');
   const verbose = args.includes('--verbose');
   const outputPath = extractFlag(args, '--output');
   const dryRun = args.includes('--dry-run');

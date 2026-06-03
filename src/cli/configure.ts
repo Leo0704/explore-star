@@ -74,38 +74,30 @@ export async function runConfigure(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // 读取当前配置
-  let config: Record<string, unknown> = {};
+  // 读取当前配置（用 parseDocument 保留注释 / 锚点 / 引号风格）
+  let doc: import('yaml').Document.Parsed;
   try {
-    const { parse } = await import('yaml');
+    const { parseDocument } = await import('yaml');
     const raw = readFileSync(profilePath, 'utf-8');
-    config = parse(raw) as Record<string, unknown>;
+    doc = parseDocument(raw);
+    if (doc.errors.length > 0) {
+      console.error('错误：profile.yaml 解析有问题', doc.errors[0]?.message);
+      process.exit(1);
+    }
   } catch {
     console.error('错误：无法解析 profile.yaml');
     process.exit(1);
   }
 
-  // 应用修改
+  // 应用修改（setIn 会自动创建不存在的中间路径）
   if (disableFeature) {
-    const feature = disableFeature;
-    if (!config.feedback_config) config.feedback_config = {};
-    if (!((config.feedback_config as Record<string, unknown>).auto_apply)) {
-      (config.feedback_config as Record<string, unknown>).auto_apply = {};
-    }
-    const autoApply = (config.feedback_config as Record<string, unknown>).auto_apply as Record<string, boolean>;
-    autoApply[`${feature}`] = false;
-    console.log(`✅ 已禁用 ${feature}`);
+    doc.setIn(['feedback_config', 'auto_apply', disableFeature], false);
+    console.log(`✅ 已禁用 ${disableFeature}`);
   }
 
   if (enableFeature) {
-    const feature = enableFeature;
-    if (!config.feedback_config) config.feedback_config = {};
-    if (!((config.feedback_config as Record<string, unknown>).auto_apply)) {
-      (config.feedback_config as Record<string, unknown>).auto_apply = {};
-    }
-    const autoApply = (config.feedback_config as Record<string, unknown>).auto_apply as Record<string, boolean>;
-    autoApply[`${feature}`] = true;
-    console.log(`✅ 已启用 ${feature}`);
+    doc.setIn(['feedback_config', 'auto_apply', enableFeature], true);
+    console.log(`✅ 已启用 ${enableFeature}`);
   }
 
   if (setKeyValue) {
@@ -114,13 +106,18 @@ export async function runConfigure(args: string[]): Promise<void> {
       console.error('错误：--set 格式应为 key=value');
       process.exit(1);
     }
-    // 简化处理：直接写字符串值
+    // 自动类型转换：true / false → 布尔，数字字面量 → 数字，其余按字符串
+    let parsed: unknown = value;
+    if (value === 'true') parsed = true;
+    else if (value === 'false') parsed = false;
+    else if (/^-?\d+(?:\.\d+)?$/.test(value)) parsed = Number(value);
+    doc.setIn(key.split('.'), parsed);
     console.log(`✅ 已设置 ${key}=${value}`);
   }
 
-  // 写回文件（简化版：不做完整 YAML 处理）
-  console.log('\n注意：V1.4 configure 子命令暂不实际写入文件（YAML 读写需要 yaml 库）');
-  console.log('建议手动编辑 profile.yaml 或使用其他工具修改配置');
+  // 写回文件（doc.toString 保留原注释和格式）
+  writeFileSync(profilePath, doc.toString(), 'utf-8');
+  console.log(`\n✅ 已写入 ${profilePath}`);
 }
 
 export async function runCLI(args: string[]): Promise<void> {

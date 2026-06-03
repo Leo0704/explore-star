@@ -8,7 +8,7 @@
  *   - checkEmergencyStop: 紧急停止开关
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getNotifier, getCRM, getChannel, listLLMs } from '../adapters/registry.js';
 import { loadBusinessProfile } from '../core/business-profile.js';
@@ -63,16 +63,27 @@ export async function checkAll(businessDir?: string): Promise<HealthCheckResult>
 export async function checkSystemHealth(): Promise<HealthCheckResult> {
   const checks: HealthCheckResult['checks'] = [];
 
-  // 磁盘空间检查
+  // 磁盘空间检查 —— 用 statfs 读真实剩余空间（Node 18.15+）
+  // 修复 Bug 17：之前硬编码 10GB，永远 ok，state machine 在撒谎
   try {
     const dataPath = './data';
     if (existsSync(dataPath)) {
-      const st = statSync(dataPath);
-      const freeSpaceGb = 10; // macOS 上无法直接获取磁盘剩余空间，简化处理
+      // statSync 用于确认 path 存在；statfs 才是真实磁盘空间
+      statSync(dataPath);
+      let realFreeGb = 0;
+      if (typeof statfsSync === 'function') {
+        // statfs 返回 bytes：bsize * bfree
+        const stats = statfsSync(dataPath);
+        realFreeGb = (stats.bsize * stats.bfree) / 1024 / 1024 / 1024;
+      }
+      // realFreeGb = 0 → statfs 不可用（fail-loud，不伪造 ok）
       checks.push({
         name: 'disk_space',
-        status: freeSpaceGb > 1 ? 'ok' : 'critical',
-        message: `磁盘空间充足（${freeSpaceGb} GB 可用）`,
+        status: realFreeGb > 1 ? 'ok' : realFreeGb === 0 ? 'warning' : 'critical',
+        message: realFreeGb > 0
+          ? `磁盘空间充足（${realFreeGb.toFixed(2)} GB 可用）`
+          : '无法读取磁盘剩余空间（statfs 不可用）',
+        details: { realFreeGb },
       });
     }
   } catch {

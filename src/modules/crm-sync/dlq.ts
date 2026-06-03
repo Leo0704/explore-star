@@ -154,7 +154,15 @@ export async function consumeDlq(opts: ConsumeDlqOptions): Promise<ConsumeDlqRes
       if (!dryRun) {
         await mkdir(dirname(archivePath), { recursive: true });
         await writeFile(archivePath, JSON.stringify(archiveData, null, 2), 'utf-8');
-        await unlink(filePath);
+        try {
+          await unlink(filePath);
+        } catch (e) {
+          // 归档已写入成功；unlink 失败时保留源文件（数据不丢失，胜过清掉归档）
+          log.warn(
+            { file, err: e instanceof Error ? e.message : String(e) },
+            'unlink source failed; archive preserved',
+          );
+        }
         result.archived++;
       }
 

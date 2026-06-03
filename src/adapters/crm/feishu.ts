@@ -50,25 +50,55 @@ export class FeishuCRM implements CRMAdapter {
   }
 
   async updateStatus(cid: string, status: LeadStatus, note?: string): Promise<void> {
-    // V1.4 简化：仅更新 status 字段（不传其他字段）
     const token = await this.getToken();
-    const res = await fetch(`${this.tableBase}/records`, {
-      method: 'POST',
+    const recordId = await this.findRecordIdByCid(cid, token);
+    if (!recordId) {
+      throw new Error(`飞书未找到 cid=${cid} 对应的记录，无法更新 status`);
+    }
+
+    const fields: Record<string, unknown> = {
+      [this.fieldMap('status')]: status,
+      ...(note ? { [this.fieldMap('notes')]: note } : {}),
+    };
+
+    const res = await fetch(`${this.tableBase}/records/${recordId}`, {
+      method: 'PUT',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        records: [{
-          fields: {
-            [this.fieldMap('status')]: status,
-            ...(note ? { [this.fieldMap('notes')]: note } : {}),
-          },
-        }],
-      }),
+      body: JSON.stringify({ fields }),
     });
     if (!res.ok) {
-      throw new Error(`飞书 API ${res.status}: ${await res.text()}`);
+      throw new Error(`飞书更新失败 ${res.status}: ${await res.text()}`);
+    }
+  }
+
+  async updateLeadFields(cid: string, fields: Partial<Lead>): Promise<void> {
+    const token = await this.getToken();
+    const recordId = await this.findRecordIdByCid(cid, token);
+    if (!recordId) {
+      throw new Error(`飞书未找到 cid=${cid} 对应的记录，无法更新字段`);
+    }
+
+    const patch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) continue;
+      const target = this.fieldMap(k);
+      patch[target] = v;
+    }
+    patch[this.fieldMap('updated_at')] = new Date().toISOString();
+
+    const res = await fetch(`${this.tableBase}/records/${recordId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fields: patch }),
+    });
+    if (!res.ok) {
+      throw new Error(`飞书更新字段失败 ${res.status}: ${await res.text()}`);
     }
   }
 
@@ -100,40 +130,12 @@ export class FeishuCRM implements CRMAdapter {
       }
     }
 
-    const cidField = this.config.fieldMapping['cid'] ?? 'cid';
-
-    // 1. 先用 search API 查找现有记录
-    const searchRes = await fetch(
-      `${this.tableBase}/records/search`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          filter: {
-            conjunction: 'and',
-            conditions: [{
-              field_name: cidField,
-              operator: 'is',
-              value: [lead.cid],
-            }],
-          },
-          page_size: 1,
-        }),
-      },
-    );
-    if (!searchRes.ok) {
-      throw new Error(`飞书查询失败 ${searchRes.status}: ${await searchRes.text()}`);
-    }
-    const searchData = await searchRes.json() as { data?: { items?: Array<{ record_id: string }> } };
-    const existing = searchData?.data?.items?.[0];
+    const existing = await this.findRecordIdByCid(lead.cid, token);
 
     if (existing) {
-      // 2a. 找到 → PATCH 更新
+      // 2a. 找到 → PUT 更新
       const patchRes = await fetch(
-        `${this.tableBase}/records/${existing.record_id}`,
+        `${this.tableBase}/records/${existing}`,
         {
           method: 'PUT',
           headers: {
@@ -163,6 +165,36 @@ export class FeishuCRM implements CRMAdapter {
         throw new Error(`飞书新增失败 ${postRes.status}: ${await postRes.text()}`);
       }
     }
+  }
+
+  private async findRecordIdByCid(cid: string, token: string): Promise<string | null> {
+    const cidField = this.config.fieldMapping['cid'] ?? 'cid';
+    const searchRes = await fetch(
+      `${this.tableBase}/records/search`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          filter: {
+            conjunction: 'and',
+            conditions: [{
+              field_name: cidField,
+              operator: 'is',
+              value: [cid],
+            }],
+          },
+          page_size: 1,
+        }),
+      },
+    );
+    if (!searchRes.ok) {
+      throw new Error(`飞书查询失败 ${searchRes.status}: ${await searchRes.text()}`);
+    }
+    const searchData = await searchRes.json() as { data?: { items?: Array<{ record_id: string }> } };
+    return searchData?.data?.items?.[0]?.record_id ?? null;
   }
 
   private async getToken(): Promise<string> {

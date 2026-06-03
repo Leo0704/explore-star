@@ -122,6 +122,11 @@ async function main() {
         await runCLI(rest);
         break;
       }
+      case 'schedule': {
+        const { runCLI } = await import('./schedule.js');
+        await runCLI(rest);
+        break;
+      }
       default:
         console.error(`未知命令: ${cmd}`);
         console.log(USAGE);

@@ -9,7 +9,7 @@
  * 类别与触发模式（spec §2.2）：
  *   rate_limited:    /rate.?limit|429|too.?many.?requests|throttle|限流/i
  *   auth_failed:     /auth|401|403|token|credential|expired|凭证/i
- *   schema_invalid:  /schema|field|required|missing|invalid|422|400|字段/i
+ *   schema_invalid:  /schema|field|required|missing|invalid|422|字段/i
  *   unknown:         其他
  */
 
@@ -18,7 +18,7 @@ export type CrmErrorCategory = 'rate_limited' | 'auth_failed' | 'schema_invalid'
 const PATTERNS: Record<Exclude<CrmErrorCategory, 'unknown'>, RegExp> = {
   rate_limited: /rate.?limit|429|too.?many.?requests|throttle|限流/i,
   auth_failed: /auth|401|403|token|credential|expired|凭证/i,
-  schema_invalid: /schema|field|required|missing|invalid|422|400|字段/i,
+  schema_invalid: /schema|field|required|missing|invalid|422|字段/i,
 };
 
 export function classifyCrmError(err: Error | string): CrmErrorCategory {

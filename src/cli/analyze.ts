@@ -10,6 +10,7 @@ import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, getLLM } from '../adapters/registry.js';
 import { analyzeComments } from '../modules/intent-analyzer/index.js';
 import { extractFlag, showUsage, selfInvoke } from './_shared.js';
+import type { Comment } from '../core/types.js';
 
 const USAGE = `
 用法:
@@ -48,7 +49,13 @@ export async function runAnalyze(args: string[]): Promise<void> {
 
   // 加载输入
   const raw = await readFile(inputPath, 'utf-8');
-  const comments = JSON.parse(raw);
+  let comments: Comment[];
+  try {
+    comments = JSON.parse(raw) as Comment[];
+  } catch (e) {
+    console.error(`[analyze] ❌ 解析 ${inputPath} 失败：${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  }
 
   // 加载业务配置
   const loaded = await loadBusinessProfile(businessDir);

@@ -231,13 +231,16 @@ interface ChannelsYamlConfig {
  * 加载 channels.yaml 里的 `channels.<name>` 节点。
  *
  * 路径优先级（不抛错，找不到就返回 {}）：
- *   1. `process.env.EXPLORE_STAR_CHANNELS_PATH`（测试用）
- *   2. `./channels.yaml`（业务运行时默认）
+ *   1. `setChannelConfigPath()` 显式注入（业务侧 run-daily 启动时调）
+ *   2. `process.env.EXPLORE_STAR_CHANNELS_PATH`（测试用）
+ *   3. `./channels.yaml`（CWD 相对，业务运行时默认；保持向后兼容）
  *
  * 加载失败（文件不存在 / 解析失败）→ 静默返回 {}，不阻塞业务。
  */
 async function loadChannelConfigs(): Promise<ChannelsYamlConfig> {
-  const yamlPath = process.env.EXPLORE_STAR_CHANNELS_PATH ?? resolvePath('./channels.yaml');
+  const yamlPath = _explicitChannelConfigPath
+    ?? process.env.EXPLORE_STAR_CHANNELS_PATH
+    ?? resolvePath('./channels.yaml');
   try {
     const raw = await readFile(yamlPath, 'utf-8');
     const parsed = parseYaml(raw) as ChannelsYamlConfig | null | undefined;
@@ -247,9 +250,19 @@ async function loadChannelConfigs(): Promise<ChannelsYamlConfig> {
   }
 }
 
+/** Bug 20：显式设置 channels.yaml 路径（覆盖 env / CWD 默认）。同步 set，调用后失效缓存。 */
+export function setChannelConfigPath(path: string): void {
+  _explicitChannelConfigPath = path;
+  // 失效缓存：下次 getChannelQps 走新路径
+  _channelConfigCache = null;
+  _channelConfigCachePromise = null;
+}
+
 /** 进程级缓存（避免每个调用都读盘） */
 let _channelConfigCache: ChannelsYamlConfig | null = null;
 let _channelConfigCachePromise: Promise<ChannelsYamlConfig> | null = null;
+/** Bug 20：显式注入的 channels.yaml 路径（run-daily 用，业务目录下 channels.yaml） */
+let _explicitChannelConfigPath: string | null = null;
 
 async function getChannelConfigsAsync(): Promise<ChannelsYamlConfig> {
   if (_channelConfigCache) return _channelConfigCache;

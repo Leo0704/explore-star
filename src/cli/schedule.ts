@@ -88,8 +88,8 @@ async function install(schedulePath: string, businessDir: string) {
   // 构建新的 cron 条目
   const projectDir = businessDir
   const newEntries = config.jobs.map(job => {
-    const args = job.args?.length ? ' ' + job.args.join(' ') : ''
-    const cmd = `cd ${projectDir} && npx explore-star ${job.command} --business=${projectDir}${args}`
+    const args = job.args?.length ? ' ' + job.args.map(shellQuote).join(' ') : ''
+    const cmd = `cd ${shellQuote(projectDir)} && npx explore-star ${job.command} --business=${shellQuote(projectDir)}${args}`
     return `${CRON_TAG} ${job.cron} ${cmd}  # ${job.name}`
   })
 
@@ -176,4 +176,12 @@ function removeExploreStarEntries(crontab: string): string {
     .filter(line => !line.includes(CRON_TAG))
     .join('\n')
     .trim()
+}
+
+/**
+ * 用单引号包裹 shell 值，并把值内部的单引号转成 '\''。
+ * 这样无论值里有什么元字符（空格、$、;、&、|、> 等），都会被当成字面量。
+ */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }

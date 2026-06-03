@@ -64,6 +64,21 @@ export class NotionCRM implements CRMAdapter {
     await this.patchPage(page.id, { properties });
   }
 
+  async updateLeadFields(cid: string, fields: Partial<Lead>): Promise<void> {
+    const page = await this.findPageByCid(cid);
+    if (!page) throw new Error(`Lead ${cid} not found`);
+
+    const properties: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) continue;
+      const target = this.fieldMapping?.[k] ?? k;
+      properties[target] = this.serializeValue(v);
+    }
+    properties[this.fieldMap('updated_at')] = this.serializeValue(new Date().toISOString());
+
+    await this.patchPage(page.id, { properties });
+  }
+
   async listLeads(filter?: LeadFilter): Promise<Lead[]> {
     const notionFilter = this.buildFilter(filter ?? {});
     const res = await this.queryDatabase(notionFilter);

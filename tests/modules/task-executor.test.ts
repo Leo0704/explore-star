@@ -500,6 +500,7 @@ function makeSpyCRM(overrides: Partial<CRMAdapter> = {}): CRMAdapter {
     syncLeads: vi.fn().mockResolvedValue({ synced: 0, failed: 0, errors: [] }),
     getLead: vi.fn().mockResolvedValue(null),
     updateStatus: vi.fn().mockResolvedValue(undefined),
+    updateLeadFields: vi.fn().mockResolvedValue(undefined),
     listLeads: vi.fn().mockResolvedValue([]),
     ping: vi.fn().mockResolvedValue(true),
     ...overrides,
@@ -641,5 +642,141 @@ describe('Finding 2: executeTasks 回写 CRM', () => {
     // results 仍包含该 task 的执行结果（不被中断）
     expect(results).toHaveLength(1);
     expect(results[0].result).toBe('executed_with_response');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 2 (P0): nextStateForAction 的 order 数组漏了 "已流失"
+//
+// 当 task.current_state === '已流失' 时，order.indexOf('已流失') === -1，
+// 现有代码会"误判 currentIdx > candidateIdx 为 false"而错误地推进状态。
+// 正确行为：已流失是终态，crm.updateStatus 不应被调用。
+// ---------------------------------------------------------------------------
+describe('Bug 2: 已流失 lead 不应被推进状态', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('../../src/modules/task-executor/browser-actions.js', () => browserActionsMock);
+    browserActionsMock.executeBrowserAction.mockClear();
+    browserActionsMock.likeAndFollow.mockClear();
+    browserActionsMock.commentReply.mockClear();
+    browserActionsMock.friendRequest.mockClear();
+    browserActionsMock.sendDirectMessage.mockClear();
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../../src/modules/task-executor/browser-actions.js');
+    vi.doUnmock('../../src/modules/task-executor/hook-review.js');
+    vi.doUnmock('../../src/modules/feedback-analyzer/event-recorder.js');
+    vi.resetModules();
+  });
+
+  it('(B2-1) current_state=已流失 的 task 成功执行后，crm.updateStatus 不应被调用', async () => {
+    vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
+      reviewHook: vi.fn().mockResolvedValue({ approved: true }),
+      needsReview: vi.fn().mockReturnValue(false),
+      FeishuReviewClient: vi.fn(),
+    }));
+
+    const { executeTasks } = await import('../../src/modules/task-executor/index.js');
+    const crm = makeSpyCRM();
+
+    const config: SafetyConfig = {
+      rate_limits: {
+        douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
+        min_interval_seconds: 0,
+        max_interval_seconds: 0,
+      },
+      daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
+      emergency_stop: 'config/EMERGENCY_STOP',
+      fatal_signals: [],
+      hook_review: false,
+    };
+
+    // 关键：current_state='已流失'，next_action='like_and_follow'，且 action 正常执行
+    // 期望：crm.updateStatus 一次都不被调（已流失是终态，不可推进）
+    const task = makeE2ETask({
+      task_id: 'tB2_1',
+      lead_cid: 'cid_B2_1',
+      current_state: '已流失',
+      next_action: 'like_and_follow',
+    });
+
+    await executeTasks([task], config, { crm });
+
+    expect(crm.updateStatus).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug 3 (P0): recordTaskExecuted 的 keyword 传了空串，污染 §3.11 关键词归因
+//
+// 期望：recordTaskExecuted 的 metadata.keyword 应等于 task.source_keyword。
+// ---------------------------------------------------------------------------
+describe('Bug 3: recordTaskExecuted 传真实 keyword', () => {
+  const eventRecorderMock = {
+    recordEvent: vi.fn().mockResolvedValue(undefined),
+    recordStatusChange: vi.fn().mockResolvedValue(undefined),
+    recordTaskExecuted: vi.fn().mockResolvedValue(undefined),
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doMock('../../src/modules/task-executor/browser-actions.js', () => browserActionsMock);
+    vi.doMock('../../src/modules/feedback-analyzer/event-recorder.js', () => eventRecorderMock);
+    browserActionsMock.executeBrowserAction.mockClear();
+    browserActionsMock.likeAndFollow.mockClear();
+    browserActionsMock.commentReply.mockClear();
+    browserActionsMock.friendRequest.mockClear();
+    browserActionsMock.sendDirectMessage.mockClear();
+    eventRecorderMock.recordEvent.mockClear();
+    eventRecorderMock.recordStatusChange.mockClear();
+    eventRecorderMock.recordTaskExecuted.mockClear();
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../../src/modules/task-executor/browser-actions.js');
+    vi.doUnmock('../../src/modules/task-executor/hook-review.js');
+    vi.doUnmock('../../src/modules/feedback-analyzer/event-recorder.js');
+    vi.resetModules();
+  });
+
+  it('(B3-1) task 带 source_keyword 时，recordTaskExecuted 的 metadata.keyword 应该是该值', async () => {
+    vi.doMock('../../src/modules/task-executor/hook-review.js', () => ({
+      reviewHook: vi.fn().mockResolvedValue({ approved: true }),
+      needsReview: vi.fn().mockReturnValue(false),
+      FeishuReviewClient: vi.fn(),
+    }));
+
+    const { executeTasks } = await import('../../src/modules/task-executor/index.js');
+
+    const config: SafetyConfig = {
+      rate_limits: {
+        douyin: { search_calls_per_hour: 10, user_videos_calls_per_hour: 30, friend_request_per_day: 5, dm_per_day: 10 },
+        min_interval_seconds: 0,
+        max_interval_seconds: 0,
+      },
+      daily_budget: { videos: 50, comments_scanned: 5000, leads_created: 200, engagement_actions: 20 },
+      emergency_stop: 'config/EMERGENCY_STOP',
+      fatal_signals: [],
+      hook_review: false,
+    };
+
+    const task = makeE2ETask({
+      task_id: 'tB3_1',
+      lead_cid: 'cid_B3_1',
+      source_keyword: 'AI 副业',
+      next_action: 'like_and_follow',
+    });
+
+    await executeTasks([task], config);
+    // fire-and-forget: 等 recordTaskExecuted 落地
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    expect(eventRecorderMock.recordTaskExecuted).toHaveBeenCalledTimes(1);
+    const callArgs = eventRecorderMock.recordTaskExecuted.mock.calls[0];
+    expect(callArgs[0]).toBe('cid_B3_1');
+    // 关键：keyword 必须是真实值，不是空串
+    expect(callArgs[1].keyword).toBe('AI 副业');
+    expect(callArgs[1].keyword).not.toBe('');
   });
 });

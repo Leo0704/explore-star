@@ -32,6 +32,8 @@ export async function runInsights(args: string[]): Promise<void> {
     process.exit(1);
   }
   const outputPath = extractFlag(args, '--output') || './data/feedback/weekly-insights.json';
+  const lastRaw = extractFlag(args, '--last');
+  const weeks = lastRaw ? Math.max(1, parseInt(lastRaw, 10)) : 4;
   const dryRun = args.includes('--dry-run');
 
   await registerBuiltins();
@@ -41,7 +43,7 @@ export async function runInsights(args: string[]): Promise<void> {
   // 目前暂时不直接用 loaded，但保留接口一致性
 
   // 运行分析
-  const insights = await runWeeklyAnalysis(businessDir, { insightsPath: outputPath });
+  const insights = await runWeeklyAnalysis(businessDir, { insightsPath: outputPath, weeks });
 
   console.log(`[insights] 周报 ${insights.week_start}`);
   console.log(`  学习期完成：${insights.learning_period_complete}`);

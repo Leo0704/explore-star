@@ -69,8 +69,8 @@ export async function pushMaterial(
     interaction_time: new Date().toISOString(),
   });
 
-  // 更新 lead 状态（物料推送后推进到"已预约"阶段）
-  await opts.crm.updateStatus(lead.cid, '已预约', '已推送加微后物料');
+  // 注意：物料推送 ≠ 客户预约。状态推进留给 booking-listener / 实际客户行为。
+  // 触达事件已通过 recordEvent('touchpoint_sent') 落盘，无需再改 lead.status。
 
   return { pushed: true };
 }

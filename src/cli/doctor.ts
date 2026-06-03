@@ -6,6 +6,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { loadBusinessProfile } from '../core/business-profile.js';
 import { registerBuiltins, listLLMs, listCRMs, listEmbeddings } from '../adapters/registry.js';
@@ -58,15 +59,21 @@ export async function runDoctor(args: string[]): Promise<void> {
     warn++;
   }
 
-  // 3. LLM API Key
+  // 3. LLM API Key（兼容多 provider：DeepSeek / OpenAI / Anthropic / Ollama）
   if (process.env.DEEPSEEK_API_KEY) {
     console.log('  ✅ DEEPSEEK_API_KEY 已设置');
     pass++;
   } else if (process.env.OPENAI_API_KEY) {
     console.log('  ✅ OPENAI_API_KEY 已设置');
     pass++;
+  } else if (process.env.ANTHROPIC_API_KEY) {
+    console.log('  ✅ ANTHROPIC_API_KEY 已设置');
+    pass++;
+  } else if (process.env.OLLAMA_BASE_URL) {
+    console.log('  ✅ OLLAMA_BASE_URL 已设置（本地 LLM）');
+    pass++;
   } else {
-    console.log('  ❌ 缺 LLM API Key（DEEPSEEK_API_KEY 或 OPENAI_API_KEY）');
+    console.log('  ❌ 缺 LLM API Key（DEEPSEEK_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / OLLAMA_BASE_URL 之一）');
     fail++;
   }
 
@@ -101,10 +108,10 @@ export async function runDoctor(args: string[]): Promise<void> {
     warn++;
   }
 
-  // 6. 紧急停止开关
-  const stopPath = './config/EMERGENCY_STOP';
+  // 6. 紧急停止开关（基于 businessDir 派生路径，不再硬编码 CWD）
+  const stopPath = businessDir ? join(businessDir, 'config', 'EMERGENCY_STOP') : './config/EMERGENCY_STOP';
   if (existsSync(stopPath)) {
-    console.log('  ❌ 紧急停止开关已启用（config/EMERGENCY_STOP）');
+    console.log(`  ❌ 紧急停止开关已启用（${stopPath}）`);
     fail++;
   } else {
     console.log('  ✅ 紧急停止开关未启用');
