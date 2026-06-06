@@ -79,6 +79,47 @@ export async function checkSystemHealth(): Promise<HealthCheckResult> {
     checks.push({ name: 'today_log', status: 'warning', message: '今日尚未运行' });
   }
 
+  // cron 状态：检查最近一次 run 是否在 48h 内
+  const runHistoryPath = './data/run_history.jsonl';
+  if (existsSync(runHistoryPath)) {
+    try {
+      const lines = readFileSync(runHistoryPath, 'utf-8').trim().split('\n').filter(Boolean);
+      if (lines.length === 0) {
+        checks.push({ name: 'cron_status', status: 'warning', message: '运行历史为空，从未执行过' });
+      } else {
+        const last = JSON.parse(lines[lines.length - 1]);
+        const finishedAt = new Date(last.finished_at).getTime();
+        const hoursSince = (Date.now() - finishedAt) / (1000 * 60 * 60);
+        if (hoursSince < 24) {
+          checks.push({
+            name: 'cron_status',
+            status: 'ok',
+            message: `最近运行 ${hoursSince.toFixed(1)}h 前`,
+            details: { last_run: last.finished_at, hours_since: Math.round(hoursSince) },
+          });
+        } else if (hoursSince < 48) {
+          checks.push({
+            name: 'cron_status',
+            status: 'warning',
+            message: `最近运行 ${hoursSince.toFixed(1)}h 前，可能未按时调度`,
+            details: { last_run: last.finished_at, hours_since: Math.round(hoursSince) },
+          });
+        } else {
+          checks.push({
+            name: 'cron_status',
+            status: 'critical',
+            message: `最近运行 ${hoursSince.toFixed(1)}h 前，调度可能已中断`,
+            details: { last_run: last.finished_at, hours_since: Math.round(hoursSince) },
+          });
+        }
+      }
+    } catch {
+      checks.push({ name: 'cron_status', status: 'warning', message: '运行历史文件解析失败' });
+    }
+  } else {
+    checks.push({ name: 'cron_status', status: 'warning', message: '运行历史文件不存在，从未执行过' });
+  }
+
   const hasCritical = checks.some(c => c.status === 'critical');
   return {
     status: hasCritical ? 'critical' : checks.some(c => c.status === 'warning') ? 'warning' : 'ok',
