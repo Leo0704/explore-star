@@ -55,13 +55,28 @@ ${painPoints}
 【意图信号词】${signals}
 
 任务：生成 5-8 个抖音搜索关键词，用于找到有上述痛点的目标客户。
+
 要求：
 1. 关键词要像真人会在抖音搜索框里输入的话（口语化，不要书面语）
-2. 要直接关联痛点，不要泛词（如"AI 自动化"太泛）
+2. 要直接关联痛点，不要泛词
 3. 每个关键词 2-8 个字
 4. 只输出 JSON 数组，不要解释
 
-示例输出：["剪辑太累了", "客服回复慢", "AI出题 不好用"]`;
+**精准关键词示例（✓）：**
+- "AI落地难"（直接关联痛点）
+- "AI工具不好用"（直接关联痛点）
+- "AI怎么用"（直接关联痛点）
+- "AI效果不好"（直接关联痛点）
+- "AI落地没人会用"（直接关联痛点）
+
+**泛词示例（✗，不要生成）：**
+- "AI"（太泛）
+- "自动化"（太泛）
+- "提效"（太泛）
+- "AI工具"（太泛，没有具体场景）
+- "降本增效"（太泛）
+
+示例输出：["AI落地难", "AI工具不好用", "AI怎么用", "AI效果不好"]`;
 }
 
 function parseKeywords(raw: string): string[] {
@@ -85,7 +100,27 @@ function parseKeywords(raw: string): string[] {
   if (!Array.isArray(parsed)) return [];
 
   return (parsed as unknown[])
-    .filter((k): k is string => typeof k === 'string' && k.length > 0 && k.length <= 20);
+    .filter((k): k is string => typeof k === 'string' && k.length > 0 && k.length <= 20)
+    .filter(kw => filterKeyword(kw));
+}
+
+function filterKeyword(kw: string): boolean {
+  // 泛词列表
+  const genericWords = ['AI', '自动化', '提效', '降本增效', '工具', '服务', '解决方案'];
+
+  // 过滤太短的关键词（< 4 个字）
+  if (kw.length < 4) return false;
+
+  // 过滤太长的关键词（> 10 个字）
+  if (kw.length > 10) return false;
+
+  // 过滤包含泛词的关键词（如果关键词长度 < 6 且包含泛词）
+  if (genericWords.some(g => kw.includes(g) && kw.length < 6)) return false;
+
+  // 过滤纯泛词
+  if (genericWords.includes(kw)) return false;
+
+  return true;
 }
 
 export async function writebackGeneratedKeywords(

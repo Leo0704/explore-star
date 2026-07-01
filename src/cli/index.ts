@@ -16,6 +16,7 @@ const USAGE = `
   configure                查看/修改业务配置
   retry-dlq                重试 CRM 同步失败队列（适合 cron）
   status                  查看 run 健康概览（--business 必填，--days / --json 可选）
+  web                      启动 Web 仪表盘（默认端口 3827）
 
 全局选项：
   --help, -h               显示帮助
@@ -107,6 +108,10 @@ async function main() {
       case 'schedule': {
         const { runCLI } = await import('./schedule.js');
         await runCLI(rest);
+        break;
+      }
+      case 'web': {
+        await import('../web/server.js');
         break;
       }
       default:

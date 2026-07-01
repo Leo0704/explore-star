@@ -32,6 +32,7 @@ Thumbs.db
 # Secrets
 .env
 .env.local
+.env.*.local
 *.key
 *.pem
 

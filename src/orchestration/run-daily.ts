@@ -13,6 +13,7 @@ import { CostTracker } from '../adapters/llm/_cost-tracker.js';
 import { checkAll } from './health-check.js';
 import { RateLimiter, type ChannelRateLimitsConfig } from '../core/rate-limiter.js';
 import { CircuitBreaker } from '../core/circuit-breaker.js';
+import { getCommentStore, type StoredComment } from '../core/comment-store.js';
 
 const log = logger.child({ module: 'run-daily' });
 
@@ -199,94 +200,151 @@ async function runDailyBody(
   let videosScanned = 0;
   let rateLimiter: RateLimiter | null = null;
   let llmBreaker: CircuitBreaker | null = null;
-  try {
-    await updateStep(0, 'running');
+
+  const startStep = opts.step ?? 0;
+
+  // 步骤 0：侦察阶段（采集评论）
+  if (startStep <= 0) {
+    try {
+      await updateStep(0, 'running');
+      loaded = await loadBusinessProfile(opts.businessDir);
+      profile = loaded.profile;
+      channels = loaded.channels;
+      conversion = loaded.conversion;
+      knowledgeDir = loaded.knowledgeDir;
+      setChannelConfigPath(join(opts.businessDir, 'channels.yaml'));
+      await updateStep(0, 'completed', { mode: channels.source?.mode ?? 'sec_uid' });
+
+      await registerBuiltins();
+
+      const channelName = profile?.channel?.name ?? 'douyin';
+      await assertLoggedIn(opts.injectChannel ?? getChannel(channelName));
+
+      const mode = channels.source?.mode ?? 'sec_uid';
+
+      if (mode === 'keyword' || mode === 'both') {
+        const llmForKw = opts.injectLLM
+          ? opts.injectLLM
+          : (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
+        const { generateSearchKeywords, writebackGeneratedKeywords } = await import('../modules/keyword-generator.js');
+        const generated = await generateSearchKeywords(profile, llmForKw);
+        if (Object.keys(generated).length === 0) {
+        } else {
+          channels.search = {
+            ...channels.search,
+            keywords: { ...channels.search?.keywords, ...generated },
+          };
+          currentLog.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
+          await writebackGeneratedKeywords(join(opts.businessDir, 'channels.yaml'), generated);
+        }
+      }
+
+      const channelRateLimits: ChannelRateLimitsConfig = {
+        search_qps: (channels as { channel_rate_limits?: { douyin?: { search_qps?: number } } }).channel_rate_limits?.douyin?.search_qps ?? 1,
+        user_videos_qps: (channels as { channel_rate_limits?: { douyin?: { user_videos_qps?: number } } }).channel_rate_limits?.douyin?.user_videos_qps ?? 1,
+        comment_qps: (channels as { channel_rate_limits?: { douyin?: { comment_qps?: number } } }).channel_rate_limits?.douyin?.comment_qps ?? 1,
+        friend_request_per_day: 5,
+        dm_per_day: 10,
+      };
+      rateLimiter = RateLimiter.fromConfig({
+        channelLimits: channelRateLimits,
+        adapterLimits: { search_per_hour: 0, user_videos_per_hour: 0, comment_per_hour: 0, friend_request_per_day: 0, dm_per_day: 0 },
+      });
+
+      llmBreaker = new CircuitBreaker({
+        name: 'llm',
+        failureThreshold: 3,
+        cooldownMs: 60_000,
+        onOpen: (state) => {
+          currentLog.error({ state }, 'LLM 熔断器打开 — 后续 LLM 调用会立即 reject');
+          getNotifier('feishu').send({
+            title: '[探星] LLM 熔断',
+            body: 'LLM 连续失败 ≥ 3 次，熔断器打开 60s。',
+            level: 'critical',
+          }).catch((err: unknown) => {
+            currentLog.warn({ err: String(err) }, '熔断告警发送失败');
+          });
+        },
+      });
+
+      if (mode === 'sec_uid' || mode === 'both') {
+        await updateStep(0, 'running');
+        const result = await fetchViaSecUid(channels, knowledgeDir, opts, channelName, rateLimiter);
+        comments.push(...result.comments);
+        videosScanned += result.videos;
+      }
+
+      if (mode === 'keyword' || mode === 'both') {
+        await updateStep(0, 'running');
+        const result = await fetchViaKeyword(channels, knowledgeDir, opts, channelName, rateLimiter);
+        comments.push(...result.comments);
+        videosScanned += result.videos;
+      }
+
+      // 保存评论到数据库，去重
+      const commentStore = getCommentStore();
+      const storedComments: StoredComment[] = comments.map(c => ({
+        aweme_id: c.aweme_id,
+        comment_text: c.text,
+        nickname: c.user.nickname,
+        video_url: c.video_url,
+        video_desc: c.video_desc,
+        keyword: c.keyword,
+      }));
+      const newCommentsCount = commentStore.saveComments(storedComments);
+      const stats = commentStore.getStats();
+      currentLog.info({
+        comments: comments.length,
+        newComments: newCommentsCount,
+        totalInDb: stats.total,
+        pendingAnalysis: stats.pending,
+        videos: videosScanned,
+      }, '收集评论并保存到数据库');
+      await updateStep(0, 'completed', { comments, videosScanned });
+      stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
+    } catch (e) {
+      stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
+      throw e;
+    }
+  } else {
+    // 跳过侦察阶段，加载配置
     loaded = await loadBusinessProfile(opts.businessDir);
     profile = loaded.profile;
     channels = loaded.channels;
     conversion = loaded.conversion;
     knowledgeDir = loaded.knowledgeDir;
     setChannelConfigPath(join(opts.businessDir, 'channels.yaml'));
-    await updateStep(0, 'completed', { mode: channels.source?.mode ?? 'sec_uid' });
-
     await registerBuiltins();
-
-    const channelName = profile?.channel?.name ?? 'douyin';
-    await assertLoggedIn(opts.injectChannel ?? getChannel(channelName));
-
-    const mode = channels.source?.mode ?? 'sec_uid';
-
-    if (mode === 'keyword' || mode === 'both') {
-      const llmForKw = opts.injectLLM
-        ? opts.injectLLM
-        : (await import('../adapters/registry.js')).getLLM(profile.llm.provider);
-      const { generateSearchKeywords, writebackGeneratedKeywords } = await import('../modules/keyword-generator.js');
-      const generated = await generateSearchKeywords(profile, llmForKw);
-      if (Object.keys(generated).length === 0) {
-      } else {
-        channels.search = {
-          ...channels.search,
-          keywords: { ...channels.search?.keywords, ...generated },
-        };
-        currentLog.info({ keywords: Object.keys(generated) }, '合并 LLM 生成的关键词');
-        await writebackGeneratedKeywords(join(opts.businessDir, 'channels.yaml'), generated);
-      }
-    }
-
-    const channelRateLimits: ChannelRateLimitsConfig = {
-      search_qps: (channels as { channel_rate_limits?: { douyin?: { search_qps?: number } } }).channel_rate_limits?.douyin?.search_qps ?? 1,
-      user_videos_qps: (channels as { channel_rate_limits?: { douyin?: { user_videos_qps?: number } } }).channel_rate_limits?.douyin?.user_videos_qps ?? 1,
-      comment_qps: (channels as { channel_rate_limits?: { douyin?: { comment_qps?: number } } }).channel_rate_limits?.douyin?.comment_qps ?? 1,
-      friend_request_per_day: 5,
-      dm_per_day: 10,
-    };
-    rateLimiter = RateLimiter.fromConfig({
-      channelLimits: channelRateLimits,
-      adapterLimits: { search_per_hour: 0, user_videos_per_hour: 0, comment_per_hour: 0, friend_request_per_day: 0, dm_per_day: 0 },
-    });
-
-    llmBreaker = new CircuitBreaker({
-      name: 'llm',
-      failureThreshold: 3,
-      cooldownMs: 60_000,
-      onOpen: (state) => {
-        currentLog.error({ state }, 'LLM 熔断器打开 — 后续 LLM 调用会立即 reject');
-        getNotifier('feishu').send({
-          title: '[探星] LLM 熔断',
-          body: 'LLM 连续失败 ≥ 3 次，熔断器打开 60s。',
-          level: 'critical',
-        }).catch((err: unknown) => {
-          currentLog.warn({ err: String(err) }, '熔断告警发送失败');
-        });
-      },
-    });
-
-    if (mode === 'sec_uid' || mode === 'both') {
-      await updateStep(0, 'running');
-      const result = await fetchViaSecUid(channels, knowledgeDir, opts, channelName, rateLimiter);
-      comments.push(...result.comments);
-      videosScanned += result.videos;
-    }
-
-    if (mode === 'keyword' || mode === 'both') {
-      await updateStep(0, 'running');
-      const result = await fetchViaKeyword(channels, knowledgeDir, opts, channelName, rateLimiter);
-      comments.push(...result.comments);
-      videosScanned += result.videos;
-    }
-
-    currentLog.info({ comments: comments.length, videos: videosScanned }, '收集评论');
-    await updateStep(0, 'completed', { comments, videosScanned });
-    stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
-  } catch (e) {
-    stepDurations['reconnaissance'] = Date.now() - stepStart_recon;
-    throw e;
+    currentLog.info({ startStep }, '跳过侦察阶段，从数据库加载评论');
+    stepDurations['reconnaissance'] = 0;
   }
 
   await updateStep(1, 'running');
   const stepStart_analysis = Date.now();
 
-  const filtered = preprocessComments(comments, channels);
+  // 从数据库获取未分析的评论
+  const commentStore = getCommentStore();
+  const unanalyzedComments = commentStore.getUnanalyzedComments(1000);
+  currentLog.info({
+    unanalyzed: unanalyzedComments.length,
+    totalInDb: commentStore.getStats().total,
+  }, '从数据库获取未分析评论');
+
+  // 将 StoredComment 转换为 Comment 格式
+  const commentsToAnalyze: Comment[] = unanalyzedComments.map(c => ({
+    cid: `${c.aweme_id}-${c.nickname}-${c.id}`,
+    aweme_id: c.aweme_id,
+    video_url: c.video_url,
+    video_desc: c.video_desc,
+    keyword: c.keyword,
+    text: c.comment_text,
+    user: { nickname: c.nickname, uid: '', follower_count: 0, signature: '' },
+    digg_count: 0,
+    create_time: '',
+    reply_count: 0,
+  }));
+
+  const filtered = preprocessComments(commentsToAnalyze, channels);
   currentLog.info({ filtered: filtered.length }, '过滤评论');
   await updateStep(1, 'completed', { filtered: filtered.length });
 
@@ -315,16 +373,34 @@ async function runDailyBody(
         costTracker,
         modelName: profile.llm.model,
         fallbackLLMs: await loadFallbackLLMs(profile),
-        breaker: llmBreaker,
+        breaker: llmBreaker ?? undefined,
       };
       const batchSize = 10;
+      const analyzedIds: number[] = [];
       for (let i = 0; i < filtered.length; i += batchSize) {
         const batch = filtered.slice(i, i + batchSize);
         costTracker.recordBatchSize(batch.length);
         const result = await analyzeBatch(batch, batchCtx);
         leads.push(...result.leads);
         result.rejected.forEach(r => errors.push(`[reject] ${r.cid}: ${r.reason}`));
+
+        // 标记已分析的评论
+        for (const comment of batch) {
+          const storedComment = unanalyzedComments.find(c =>
+            `${c.aweme_id}-${c.nickname}-${c.id}` === comment.cid
+          );
+          if (storedComment?.id) {
+            analyzedIds.push(storedComment.id);
+          }
+        }
       }
+
+      // 批量标记为已分析
+      if (analyzedIds.length > 0) {
+        commentStore.markManyAnalyzed(analyzedIds, 'success');
+        currentLog.info({ analyzed: analyzedIds.length }, '已标记评论为已分析');
+      }
+
       (opts as { costSnapshot?: ReturnType<typeof costTracker.snapshot> }).costSnapshot = costTracker.snapshot();
       stepDurations['analysis'] = Date.now() - stepStart_analysis;
     } catch (e) {
@@ -793,13 +869,29 @@ export async function runCLI(args: string[]): Promise<void> {
   };
   const businessDir = get('--business');
   if (!businessDir) {
-    console.error('用法: run --business <dir> [--dry-run] [--skip-llm]');
+    console.error('用法: run --business <dir> [--dry-run] [--skip-llm] [--step <0-6>]');
+    console.error('');
+    console.error('步骤说明:');
+    console.error('  --step 0: 侦察阶段（采集评论）- 默认');
+    console.error('  --step 1: 分析阶段（LLM 分析）');
+    console.error('  --step 2: CRM 同步');
+    console.error('  --step 3: 任务生成');
+    console.error('  --step 4: 任务执行');
+    console.error('  --step 5: 通知');
+    console.error('  --step 6: 健康检查');
+    process.exit(1);
+  }
+  const stepStr = get('--step');
+  const step = stepStr ? parseInt(stepStr, 10) : 0;
+  if (isNaN(step) || step < 0 || step > 6) {
+    console.error('错误: --step 必须是 0-6 之间的数字');
     process.exit(1);
   }
   await runDaily({
     businessDir,
     dryRun: args.includes('--dry-run'),
     skipLLM: args.includes('--skip-llm'),
+    step,
   });
 }
 

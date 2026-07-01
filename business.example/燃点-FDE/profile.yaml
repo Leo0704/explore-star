@@ -20,39 +20,35 @@ business:
     6 周交付、98% 复购率。
 
 target_personas:
-  - id: self_media
-    name: "自媒体矩阵"
-    description: "做多账号内容生产的小团队或工作室（5-50 万粉）"
+  - id: ai_beginner
+    name: "AI 小白企业"
+    description: "想用 AI 但不知道怎么开始的企业"
     typical_pain_points:
-      - "AI 剪辑能不能省人工"
-      - "AI 写脚本质量不稳定"
-      - "多账号分发太耗时"
-    value_score: 9.5  # 由 §3.11 自动调整
+      - "AI 落地难"
+      - "不知道怎么用 AI"
+      - "AI 工具太多不知道选哪个"
+      - "想用 AI 提效但不会搞"
+    value_score: 8.0  # 由 §3.11 自动调整
 
-  - id: ecommerce
-    name: "电商"
-    description: "电商品牌方/操盘手，5-50 人团队，年 GMV 500 万-5 亿"
+  - id: ai_stuck
+    name: "AI 卡壳企业"
+    description: "已经在用 AI 但效果不好的企业"
     typical_pain_points:
-      - "AI 客服回复太机械"
-      - "AI 生成商品图过不了审核"
-      - "多语言跨境文案成本高"
-    value_score: 4.0
-
-  - id: online_edu
-    name: "在线教育"
-    description: "K12 或成人教育公司，20-200 人教研团队"
-    typical_pain_points:
-      - "AI 出题质量不达标"
-      - "AI 助教答非所问"
-      - "学员反馈响应慢"
-    value_score: 6.0
+      - "AI 效果不好"
+      - "AI 工具不好用"
+      - "AI 落地后没人会用"
+      - "AI 投入产出比低"
+    value_score: 9.0  # 已经在用 AI，说明有预算和需求
 
 intent_signals:
-  - "AI 工具"
-  - "自动化"
-  - "降本增效"
-  - "小团队"
-  - "求推荐"
+  - "AI 落地"
+  - "AI 效果不好"
+  - "AI 怎么用"
+  - "AI 工具不好用"
+  - "AI 落地难"
+  - "有没有靠谱的 AI"
+  - "AI 能不能提效"
+  - "AI 能不能省人工"
 
 buying_stages:
   - id: awareness
@@ -71,7 +67,7 @@ llm:
   api_key_env: CUSTOM_API_KEY
   base_url: "https://token-plan-sgp.xiaomimimo.com/v1"
   temperature: 0.3
-  max_tokens: 1000
+  max_tokens: 4000
 
 # Q1 切换：embedding 改用国产通义千问（阿里云百炼）
 # 申请 API Key：https://bailian.console.aliyun.com/

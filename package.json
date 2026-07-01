@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:web": "cd web && npm run build",
+    "build:all": "npm run build && npm run build:web",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,7 +25,8 @@
     "convert": "node dist/cli/convert.js",
     "insights": "node dist/cli/insights.js",
     "retry-dlq": "node dist/cli/retry-dlq.js",
-    "status": "node dist/cli/status.js"
+    "status": "node dist/cli/status.js",
+    "web": "node dist/web/server.js"
   },
   "keywords": [
     "douyin",

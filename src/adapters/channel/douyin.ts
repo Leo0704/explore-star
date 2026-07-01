@@ -113,6 +113,7 @@ export class DouyinChannel implements ChannelAdapter {
     if (!secUid) throw new Error('Douyin getUserVideos 需要 sec_uid');
     const page = await getPage();
     const limit = Math.min(opts.limit ?? 20, 20);
+    const commentLimit = opts.commentLimit ?? 10;
     await page.goto(`https://www.douyin.com/user/${secUid}`);
     await new Promise(r => setTimeout(r, 5000));
 
@@ -142,9 +143,28 @@ export class DouyinChannel implements ChannelAdapter {
     for (let i = 0; i < Math.min(videoCards.length, limit); i++) {
       const v = videoCards[i];
       const title = v.texts.find((t: string) => t.length > 5) || v.texts[0] || '';
+
+      // 获取评论
+      let topComments: UserVideo['top_comments'] = [];
+      if (opts.withComments !== false) {
+        try {
+          const rawComments = await this.getVideoComments(v.aweme_id, commentLimit);
+          topComments = rawComments.map((c, idx) => ({
+            cid: `${v.aweme_id}-comment-${idx}`,
+            text: c.text,
+            user: { nickname: c.nickname, uid: c.uid, follower_count: 0, signature: '' },
+            digg_count: c.digg_count,
+            create_time: 0,
+            reply_count: 0,
+          }));
+        } catch (e) {
+          log.warn({ err: e, aweme_id: v.aweme_id }, '获取视频评论失败');
+        }
+      }
+
       videos.push({
         index: i + 1, aweme_id: v.aweme_id, title,
-        duration: 0, digg_count: 0, play_url: '', top_comments: [],
+        duration: 0, digg_count: 0, play_url: '', top_comments: topComments,
       });
     }
     return videos;

@@ -125,7 +125,7 @@ export async function registerBuiltins(): Promise<void> {
 
   llm.registerAll?.();
   crm.registerAll?.();
-  channel.registerAll?.();
+  await channel.registerAll?.();
   notifier.registerAll?.();
   embedding.registerAll?.();
   booking.registerAll?.();

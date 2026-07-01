@@ -44,7 +44,7 @@ export class OpenAICompatibleLLM implements LLMProvider {
       model: this.opts.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: opts.temperature ?? 0.3,
-      max_tokens: opts.maxTokens ?? 1000,
+      max_tokens: opts.maxTokens ?? 4000,
     };
     if (opts.responseFormat === 'json') {
       body.response_format = { type: 'json_object' };

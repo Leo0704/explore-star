@@ -1,4 +1,3 @@
-import { CsvCRM } from './csv.js';
 import { FeishuCRM } from './feishu.js';
 import { registerCRM, listCRMs } from '../registry.js';
 import { logger } from '../../core/logger.js';
@@ -6,8 +5,6 @@ import { logger } from '../../core/logger.js';
 const log = logger.child({ module: 'adapters/crm' });
 
 export function registerAll(): void {
-  registerCRM('csv', new CsvCRM('./data/leads.csv'));
-
   if (process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.FEISHU_APP_TOKEN && process.env.FEISHU_TABLE_ID) {
     registerCRM('feishu', new FeishuCRM({
       appToken: process.env.FEISHU_APP_TOKEN,
@@ -36,6 +33,5 @@ export function registerAll(): void {
   log.info({ crms: listCRMs() }, '已注册 CRM');
 }
 
-export { CsvCRM } from './csv.js';
 export { FeishuCRM } from './feishu.js';
 export type { CrmConfig } from './feishu.js';
